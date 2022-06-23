@@ -10,11 +10,11 @@ setuptools.setup(
     author_email="iossifov@cshl.edu",
     description="Autism population model",
     url="https://github.com/iossifov/graphs",
-    packages=setuptools.find_packages(where="."),
+    packages=['autpop'],
     include_package_data=False,
     entry_points="""
     [console_scripts]
-    autpop=population_threshold_model:cli
+    autpop=autpop.population_threshold_model:cli
     """,
     classifiers=[
         "Development Status :: Beta",

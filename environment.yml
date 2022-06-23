@@ -1,0 +1,18 @@
+name: autpopDev
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.8
+  - numpy
+  - scipy
+  - matplotlib
+  - ipython
+  - setuptools
+  - pytest-cov
+  - conda-build
+  - anaconda-client
+  - pyyaml
+  - flake8
+  - autopep8

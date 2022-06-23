@@ -2,14 +2,14 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from functools import partial
 from typing import List, NamedTuple, Dict, Optional, Tuple, Any
-import numpy as np
 from multiprocessing import Pool
+import numpy as np
 import pylab as pl
+import scipy.stats as stats
 from matplotlib.patches import Rectangle
 import pathlib
 import sys
-import scipy.stats as stats
-from cartisian import cartesian_product_pp, cartesian_product_itertools
+from .cartisian import cartesian_product_pp, cartesian_product_itertools
 import yaml
 import argparse
 import os
