@@ -1,0 +1,46 @@
+{% set data = load_setup_py_data() %}
+
+package:
+  name: autpop
+  version: {{ data.get('version') }}
+
+source:
+  path: ..
+
+
+build:
+  script: {{ PYTHON }} -m pip install --no-deps --ignore-installed -vv .
+  noarch: python
+  number: 0
+  entry_points:
+    - autpop = autpop.population_threshold_model:cli
+  
+requirements:
+  host:
+    - python
+    - pip
+  run:
+    - python
+    - numpy
+    - scipy
+    - matplotlib
+    - pyyaml
+
+test:
+  source_files:
+    - tests
+  requires:
+    - pytest
+    - pytest-cov
+  commands:
+    - pytest tests
+
+about:
+  home: https://github.com/iossifovlab/autpop
+  summary: Tool for exploring models of populations with autism.
+  license: MIT
+  license_file: LICENSE
+
+extra:
+  maintainers:
+   - Ivan Iossifov (iossifov@cshl.edu)

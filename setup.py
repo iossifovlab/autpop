@@ -5,7 +5,7 @@ import setuptools
 
 setuptools.setup(
     name="autpop",
-    version="0.6",
+    version="0.7",
     author="Ivan Iossifov",
     author_email="iossifov@cshl.edu",
     description="Autism population model",
