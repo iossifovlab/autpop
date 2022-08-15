@@ -1,6 +1,6 @@
 ---
 threshold_model:
-  name: Strong, rare risk
+  name: "Example 1: Strong rare positive risk"
   male_threshold: 9
   female_threshold: 11
   loci:
@@ -8,94 +8,58 @@ threshold_model:
     - {w: 8, f: 0.01, n: 2}
 ---
 threshold_model:
-  name: Uniform low, rare risk
+  name: "Example 2: Uniform rare positive risk"
   male_threshold: 7
   female_threshold: 8
   loci:
     - {w: 1, f: 0.05, n: 40}
 ---
 threshold_model:
-  name: Common risk with protection
-  male_threshold: 1
-  female_threshold: 2
+  name: "Example 2: Uniform rare positive risk (ivan)"
+  male_threshold: 8
+  female_threshold: 9
   loci:
-    - {w: 1, f: 0.4, n: 1}
-    - {w: -2, f: 0.7, n: 1}
+    - {w: 1, f: 0.05, n: 40}
 ---
 threshold_model:
-  name: Common risk with protection NORMALIZED
-  male_threshold: 5
-  female_threshold: 6
+  name: "Example 3: Protective variant"
+  male_threshold: 18
+  female_threshold: 26
   loci:
-    - {w: 1, f: 0.4, n: 1}
-    - {w: 2, f: 0.3, n: 1}
+    - {w: 1, f: 0.025, n: 160}
+    - {w: 2, f: 0.025, n: 80}
+    - {w: -10, f: 0.01, n: 150}
 ---
 threshold_model:
-  name: Common risk with protection, and females
+  name: "Example 3: Protective variant (ivan candidate 1)"
+  male_threshold: 8
+  female_threshold: 10
+  loci:
+    - {w: 1, f: 0.2, n: 20}
+    - {w: -10, f: 0.25, n: 5}
+---
+threshold_model:
+  name: "Example 3: Protective variant (ivan)"
+  male_threshold: 8
+  female_threshold: 10
+  loci:
+    - {w: 1, f: 0.4, n: 10}
+    - {w: -10, f: 0.5, n: 2}
+---
+threshold_model:
+  name: "Example 4: Frequent risk with protection"
   male_threshold: 1.15
   female_threshold: 2
   loci:
     - {w: 1, f: 0.4, n: 1}
-    - {w: -15, f: 0.7, n: 1}
-    - {w: 0.01, f: 0.5, n: 2}
-    - {w: -0.01, f: 0.5, n: 2}
+    - {w: -2, f: 0.7, n: 1}
+    - {w: 0.01, f: 0.5, n: 15}
+    - {w: -0.01, f: 0.5, n: 15}
 ---
 threshold_model:
-  name: Common risk with protection, and females NORMALIZED
-  male_threshold: 31.15
-  female_threshold: 32
+  name: "Example 5: Complex frequent risk with protection"
+  male_threshold: 10.8
+  female_threshold: 11.25
   loci:
-    - {w: 1, f: 0.4, n: 1}
-    - {w: 15, f: 0.3, n: 1}
-    - {w: 0.01, f: 0.5, n: 2}
-    - {w: -0.01, f: 0.5, n: 2}
----
-threshold_model:
-  name: weird
-  male_threshold: 3.1
-  female_threshold: 4.1
-  loci:
-    - {w: 1, f: 0.98, n: 2}
-    - {w: -5, f: 0.7, n: 2}
----
-threshold_model:
-  name: weird NORMALIZED
-  male_threshold: 19.1
-  female_threshold: 20.1
-  loci:
-    - {w: -1, f: 0.02, n: 2}
-    - {w: 5, f: 0.3, n: 2}
----
-threshold_model:
-  name: abba simple
-  male_threshold: 13.11
-  female_threshold: 14
-  loci:
-    - {w: 1, f: 0.75, n: 7}
-    - {w: 0.1, f: 0.2, n: 1}
----
-threshold_model:
-  name: abba simple NORMALIZED
-  male_threshold: -0.89
-  female_threshold: 0
-  loci:
-    - {w: -1, f: 0.25, n: 7}
-    - {w: 0.1, f: 0.2, n: 1}
----
-threshold_model:
-  name: wigler another nice
-  male_threshold: 1.991
-  female_threshold: 2
-  loci:
-    - {w: 1, f: 0.7, n: 1}
-    - {w: 1.6, f: 0.03, n: 1}
-    - {w: -0.01, f: 0.1, n: 16}
----
-threshold_model:
-  name: wigler another nice NORMALIZED
-  male_threshold: -0.009
-  female_threshold: 0
-  loci:
-    - {w: -1, f: 0.3, n: 1}
-    - {w: 1.6, f: 0.03, n: 1}
-    - {w: -0.01, f: 0.1, n: 16}
+    - {w: 0.15, f: 0.9, n: 40}
+    - {w: -15, f: 0.03, n: 60}

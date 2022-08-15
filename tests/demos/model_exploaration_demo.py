@@ -5,8 +5,8 @@ from autpop.population_threshold_model import Model, PopulationVariant
 
 if __name__ == "__main__":
     GSB = []
-    for f in np.arange(0.01, 0.5, 0.02):
-        for g in np.arange(0.01, 0.5, 0.02):
+    for f in np.arange(0.01, 1.0, 0.02):
+        for g in np.arange(0.01, 1.0, 0.02):
             model = Model(f"f:{f:.2f}, g:{g:.2f}", 1, 2,
                           [PopulationVariant(f, 1), PopulationVariant(g, -2)])
             print(model.model_name)

@@ -881,7 +881,7 @@ class MyGS:
 
 
 def draw_population_liability(model: Model, ax):
-    pop_liability = model.generate_population_liability(1000)
+    pop_liability = model.generate_population_liability(10000)
     pop_liability_values, pop_liability_counts = np.unique(
         pop_liability, return_counts=True)
     ax.plot(pop_liability_values, pop_liability_counts/len(pop_liability),
