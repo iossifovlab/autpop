@@ -1039,6 +1039,9 @@ def cli(cli_args=None):
     parser.add_argument("-m", "--model", nargs="*",
                         help="the model names to work on")
 
+    parser.add_argument("-r", "--runs", type=int, default=1,
+                        help="number of runs per model")
+
     parser.add_argument("-fm", "--family_mode", default="dynamic", type=str,
                         help='''
             Allowed values are: 'all', 'sample', and 'dynamic' (the default).
@@ -1090,20 +1093,23 @@ def cli(cli_args=None):
     GSB = []
     for model in models:
         print(f"\n\nWorking on {model.model_name}...")
-        res_dir = out_dir / model.model_name
-        res_dir.mkdir(parents=True, exist_ok=True)
-        family_stats, global_stats = model.compute_stats(
-            family_mode=args.family_mode, family_number=args.family_number,
-            genotype_type_number=args.genotype_number,
-            family_stats_mode=args.children_mode,
-            children_number=args.children_number)
+        for run in range(args.runs):
+            print(f"RUN {run}")
 
-        save_stats(family_stats, res_dir /
-                   f"family_types_{model.model_name}.txt")
-        save_stats_wigler(family_stats, res_dir /
-                          f"family_types_wigler_{model.model_name}.txt")
-        save_global_stats(global_stats)
-        save_global_stats(global_stats,
-                          res_dir / f"global_stats_{model.model_name}")
-        GSB.append(global_stats)
+            res_dir = out_dir / f"{model.model_name}.run{run}"
+            res_dir.mkdir(parents=True, exist_ok=True)
+            family_stats, global_stats = model.compute_stats(
+                family_mode=args.family_mode, family_number=args.family_number,
+                genotype_type_number=args.genotype_number,
+                family_stats_mode=args.children_mode,
+                children_number=args.children_number)
+
+            save_stats(family_stats, res_dir /
+                       f"family_types_{model.model_name}.txt")
+            save_stats_wigler(family_stats, res_dir /
+                              f"family_types_wigler_{model.model_name}.txt")
+            save_global_stats(global_stats)
+            save_global_stats(global_stats,
+                              res_dir / f"global_stats_{model.model_name}")
+            GSB.append(global_stats)
     save_global_stats_table(GSB, out_dir / "models_results.txt")
