@@ -1,0 +1,57 @@
+---
+threshold_model:
+  name: "Example 1: Strong rare positive risk"
+  male_threshold: 9
+  female_threshold: 11
+  loci:
+    - {w: 1, f: 0.05, n: 40}
+    - {w: 8, f: 0.01, n: 2}
+  notes: >
+    This  model illustrates a rare risk allele
+    strong with respect to thresholds. 
+    Leads to matching the measured parameters except that the mother is 
+    the more shared parent.
+
+
+---
+threshold_model:
+  name: "Example 2: Uniform rare positive risk"
+  male_threshold: 8
+  female_threshold: 9
+  loci:
+    - {w: 1, f: 0.05, n: 40}
+  notes: >
+    This shows that in the absence of a strong risk allele, 
+    rare weak allels cause the share of the father approaches 
+    the share of the mother.
+---
+threshold_model:
+  name: "Example 4: Homozygous effect on sharing"
+  male_threshold: 1.2
+  female_threshold: 2
+  loci:
+    - {w: 1, f: 0.125, n: 1}
+    - {w: 0.01, f: 0.1, n: 3}
+    - {w: -0.01, f: 0.1, n: 3}
+  notes: >
+    This model illustrates that tolerance of a homozygous state
+    but only (better) in the mothers 
+    leads to increased sharing in the father.
+    
+    To give females some risk, we added low level wobble
+    bringing them autism,
+    without affecting otherwise the risk to boys.
+    This makes the example slightly convoluted.
+---
+threshold_model:
+  name: "Example 5: Complex frequent risk with protection"
+  male_threshold: 10.7
+  female_threshold: 11.25
+  loci:
+    - {w: 0.15, f: 0.9, n: 40}
+    - {w: -15, f: 0.03, n: 60}
+  notes: >
+    This illustrates a complex configuration
+    with protective alleles and risk alleles that are tolerated better 
+    in the mothers than the fathers.
+    Produces high father to mother sharing ratio.

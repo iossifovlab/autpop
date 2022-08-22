@@ -39,7 +39,7 @@ threshold_model:
     - {w: -10, f: 0.25, n: 5}
 ---
 threshold_model:
-  name: "Example 3: Protective variant (ivan)"
+  name: "Example 3: Protective variant (ivan candidate 2)"
   male_threshold: 8
   female_threshold: 10
   loci:

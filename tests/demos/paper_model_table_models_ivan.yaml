@@ -1,23 +1,30 @@
 ---
 threshold_model:
   name: "Example 1: Strong rare positive risk"
-  male_threshold: 14
-  female_threshold: 18
-  loci:
-    - {w: 1, f: 0.4, n: 10}
-    - {w: 10, f: 0.01, n: 2}
----
-threshold_model:
-  name: "Example 2: Uniform rare positive risk"
-  male_threshold: 12
-  female_threshold: 13
-  loci:
-    - {w: 1, f: 0.4, n: 10}
----
-threshold_model:
-  name: "Example 3: Protective variant"
   male_threshold: 5
   female_threshold: 6
   loci:
-    - {w: 1, f: 0.2, n: 10}
-    - {w: -2, f: 0.4, n: 3}
+    - {w: 1, f: 0.1, n: 10}
+    - {w: 5, f: 0.01, n: 2}
+---
+threshold_model:
+  name: "Example 2: Uniform rare positive risk"
+  male_threshold: 5
+  female_threshold: 6
+  loci:
+    - {w: 1, f: 0.1, n: 10}
+---
+threshold_model:
+  name: "Example 3: Protective variant"
+  male_threshold: 2
+  female_threshold: 4
+  loci:
+    - {w: 1, f: 0.1, n: 10}
+    - {w: -10, f: 0.5, n: 2}
+---
+threshold_model:
+  name: "Example 4: Homozygosity"
+  male_threshold: 12
+  female_threshold: 13
+  loci:
+    - {w: 1, f: 0.9, n: 10}

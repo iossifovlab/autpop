@@ -985,9 +985,10 @@ def save_global_stats_table(GSB, file_name: Optional[pathlib.Path] = None):
         F = sys.stdout
 
     hls = [
-        ",Model Definition,,,,,Initial,,Unaffected parents,,Multiplex,,,,Simplex",
-        ",threshold,,loci,,,risk,,risk,,risk,,SLC,,risk,,SLC",
-        "Model name,male,female,w,f,n,male,female,male,female,male,"
+        ",Model Definition,,,,,Initial,,All Families,,Multiplex,,,,Simplex",
+        ",threshold,,loci,,,risk,,risk,,risk,,SCL,,risk,,anti-SCL",
+        "Model Name,male,female,weight,frequency,number,"
+        "male,female,male,female,male,"
         "female,paternal,maternal,male,female,paternal,maternal"
     ]
     for hl in hls:
