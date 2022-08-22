@@ -978,7 +978,8 @@ def save_global_stats_buff_summary(global_stats_buff,
         F.close()
 
 
-def save_global_stats_table(GSB, file_name: Optional[pathlib.Path] = None):
+def save_global_stats_table(GSB, file_name: Optional[pathlib.Path] = None,
+                            prec: Optional[int] = 3):
     if file_name:
         F = open(file_name, "w")
     else:
@@ -1016,12 +1017,18 @@ def save_global_stats_table(GSB, file_name: Optional[pathlib.Path] = None):
                                 'Families with one affected one unaffected boy']:
                     for gender in ['male', 'female']:
                         param = f'{gender} risk'
-                        cs.append(f'{GS[section][param]: .3f}')
+                        if prec:
+                            cs.append(f'{GS[section][param]: .{prec}f}')
+                        else:
+                            cs.append(f'{GS[section][param]}')
                     if not section.startswith('Families'):
                         continue
                     for parent in ['father', 'mother']:
                         param = f'sharing of the {parent}'
-                        cs.append(f'{GS[section][param]: .3f}')
+                        if prec:
+                            cs.append(f'{GS[section][param]: .{prec}f}')
+                        else:
+                            cs.append(f'{GS[section][param]}')
             print("\t".join(map(str, cs)), file=F)
     if file_name:
         F.close()

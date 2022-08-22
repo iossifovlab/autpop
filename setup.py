@@ -15,6 +15,7 @@ setuptools.setup(
     entry_points="""
     [console_scripts]
     autpop=autpop.population_threshold_model:cli
+    autpop_summary=autpop.summarize_results:cli
     """,
     classifiers=[
         "Development Status :: Beta",
