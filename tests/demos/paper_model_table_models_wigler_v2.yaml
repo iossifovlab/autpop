@@ -11,8 +11,6 @@ threshold_model:
     strong with respect to thresholds. 
     Leads to matching the measured parameters except that the mother is 
     the more shared parent.
-
-
 ---
 threshold_model:
   name: "Example 2: Uniform rare positive risk"
@@ -24,6 +22,19 @@ threshold_model:
     This shows that in the absence of a strong risk allele, 
     rare weak allels cause the share of the father approaches 
     the share of the mother.
+---
+threshold_model:
+  name: "Example 3: Protective variant"
+  male_threshold: 18
+  female_threshold: 22
+  loci:
+    - {w: 1, f: 0.025, n: 160}
+    - {w: 2, f: 0.025, n: 80}
+    - {w: -10, f: 0.01, n: 150}
+  notes: >
+    This model illustrates that a protective allele 
+    can lead to more sharing of the father.
+    To make it work we need some "subthreshold noise."
 ---
 threshold_model:
   name: "Example 4: Homozygous effect on sharing"
