@@ -1,5 +1,6 @@
 from autpop.population_threshold_model import save_global_stats_table
 from collections import defaultdict
+import numpy as np
 import re
 import glob
 import sys
@@ -43,6 +44,18 @@ def method1(vls, MXP):
             return r
 
 
+def method2(vls, MXP):
+    mn = np.mean(vls)
+    for p in range(MXP, -1, -1):
+        mvs = f'%.{p}f' % mn
+        mv = float(f'%.{p}f' % mn)
+        md = max([abs(mv-v) for v in vls])
+        dst_cutoff = (10**-(p-1)) / 2
+        # print("\t", p, mvs, mv, md, dst_cutoff)
+        if md < dst_cutoff:
+            return mvs
+
+
 def summarize(GSB):
     r = []
     by_models = defaultdict(list)
@@ -56,7 +69,7 @@ def summarize(GSB):
             for key, v in dd.items():
                 if isinstance(v, float):
                     vs = [G[sec][key] for G in GSS]
-                    GS[sec][key] = method1(vs, 3)
+                    GS[sec][key] = method2(vs, 4)
         r.append(GS)
     return r
 
