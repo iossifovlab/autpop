@@ -15,58 +15,67 @@ import argparse
 import os
 
 
-class PopulationVariant(NamedTuple):
-    f: float
+class LocusClass(NamedTuple):
     w: float
+    n: int = 1
+    f: float = 0.01
 
 
 class Model:
     def __init__(self, model_name: str,
                  male_threshold: float,
                  female_threshold: float,
-                 population_variants: List[PopulationVariant]):
+                 locus_classes: List[LocusClass]):
         self.model_name = model_name
         self.male_threshold = male_threshold
         self.female_threshold = female_threshold
-        self.population_variants = population_variants
+        self.locus_classes = locus_classes
         self.family_types: List[FamilyType] = []
+
+    def get_number_of_loci(self):
+        return sum([lc.n for lc in self.locus_classes])
+
+    def get_number_of_individual_genotypes_types(self):
+        ns = np.array([lc.n for lc in self.locus_classes])
+        return ((ns+1)*(ns+2)//2).prod()
 
     def describe(self, F=sys.stdout):
         print(f"MODEL {self.model_name}", file=F)
         print(f"\tmale_threshold: {self.male_threshold}", file=F)
         print(f"\tfemale_threshold: {self.female_threshold}", file=F)
-        print(
-            f"\tpopulation variants: {len(self.population_variants)}", file=F)
-        pv_cnts = Counter([(pv.f, pv.w) for pv in self.population_variants])
-        for (f, w), n in pv_cnts.items():
-            print(f"\t\tf: {f}, w: {w}, n: {n}", file=F)
+        print(f"\tpopulation variants: {self.get_number_of_loci()}", file=F)
+        for lc in self.locus_classes:
+            print(f"\t\tf: {lc.f}, w: {lc.w}, n: {lc.n}", file=F)
 
+        '''
         NF = sum([ft.unascertained_weight for ft in self.family_types])
 
         print(
             f"\tNumber of families: {NF}", file=F)
         print(f"\tNumber of family types: {len(self.family_types)}", file=F)
-
         n_hets_mean = sum([ft.get_number_of_hets()*ft.unascertained_weight
                            for ft in self.family_types]) / NF
         n_hets_max = max([ft.get_number_of_hets() for ft in self.family_types])
         print(f"\tAverage number of hets: {n_hets_mean}", file=F)
         print(f"\tMaximum number of hets: {n_hets_max}", file=F)
+        '''
 
     @staticmethod
     def model_def_to_model(model_def) -> Model:
         assert len(model_def) == 1
         assert "threshold_model" in model_def
         data = model_def["threshold_model"]
-        pvs = []
+        locus_classes = []
         for locus_def in data['loci']:
-            n = locus_def.get("n", 1)
-            pvs += [PopulationVariant(locus_def["f"], locus_def["w"])] * n
+            locus_classes.append(LocusClass(
+                locus_def["w"],
+                locus_def.get("n", 1),
+                locus_def.get("f", 0.01)))
 
         return Model(data["name"],
                      data["male_threshold"],
                      data["female_threshold"],
-                     pvs)
+                     locus_classes)
 
     @staticmethod
     def load_models_file(file_name: str) -> List[Model]:
@@ -75,218 +84,40 @@ class Model:
             return [Model.model_def_to_model(model_def)
                     for model_def in model_defs]
 
-    @staticmethod
-    def load(model_name: str) -> Model:
+    def generate_all_individual_genotypes(self):
+        p_arrays = []
+        g_arrays = []
 
-        if model_name == "suppressor":
-            return Model(model_name, 14, 19,
-                         [PopulationVariant(0.025, 1)] * 160 +
-                         [PopulationVariant(0.025, 2)] * 40 +
-                         [PopulationVariant(0.025, 4)] * 20 +
-                         [PopulationVariant(0.01, -10)] * 150)
+        for lc in self.locus_classes:
+            A = []
+            for i in range(lc.n+1):
+                for j in range(lc.n+1-i):
+                    A.append((i, j, lc.n-i-j))
+            A = np.array(A, dtype=int)
+            P = stats.multinomial.pmf(A, lc.n, [lc.f*lc.f,
+                                                2*lc.f*(1-lc.f),
+                                                (1-lc.f)*(1-lc.f)])
+            p_arrays.append(P)
+            g_arrays.append(A[:, :2])
 
-        if model_name == "suppressor_v2":
-            return Model(model_name, 30, 35,
-                         [PopulationVariant(0.025, 1)] * 640 +
-                         [PopulationVariant(0.01, -10)] * 150)
+        G = cartesian_product_itertools(g_arrays)
+        P = cartesian_product_itertools(p_arrays).prod(axis=1)
 
-        if model_name == "no suppressor":
-            return Model(model_name, 25, 28,
-                         [PopulationVariant(0.025, 1)] * 160 +
-                         [PopulationVariant(0.025, 2)] * 40 +
-                         [PopulationVariant(0.025, 4)] * 20 +
-                         [PopulationVariant(0.01, -0.001)] * 150)
+        return G, P
 
-        if model_name == "no suppressor_v2":
-            return Model(model_name, 42, 45,
-                         [PopulationVariant(0.025, 1)] * 640 +
-                         [PopulationVariant(0.01, -0.001)] * 150)
+    def sample_individual_genotypes(self, number_of_individuals):
+        by_class = []
+        for lc in self.locus_classes:
+            by_class.append(stats.multinomial.rvs(
+                lc.n,
+                [lc.f*lc.f, 2*lc.f*(1-lc.f), (1-lc.f)*(1-lc.f)],
+                number_of_individuals)[:, :2])
+        return np.array(by_class).transpose([1, 0, 2])
 
-        if model_name == "debug":
-            return Model(model_name, 1, 2,
-                         [PopulationVariant(0.2, 1)] * 5 +
-                         [PopulationVariant(0.1, -10)] * 1)
+    def generate_all_family_types(self, genotype_type_number=10_000,
+                                  family_number=100_000, warn=False) -> bool:
 
-        if model_name == "abba_original":
-            return Model(model_name, 12, 13, [PopulationVariant(0.377, 1)] * 10)
-
-        if model_name == "abba_v2":
-            return Model(model_name, 10, 11, [PopulationVariant(0.7, 1)] * 6)
-
-        if model_name == "abba_v3":
-            return Model(model_name, 5, 8,
-                         [PopulationVariant(0.7, 1)] * 6 +
-                         [PopulationVariant(0.01, -10)] * 150)
-
-        if model_name == "abba_v4":
-            return Model(model_name, 7, 8.5,
-                         [PopulationVariant(0.7, 0.5)] * 12 +
-                         [PopulationVariant(0.01, -10)] * 75)
-
-        if model_name == "abba_toy":
-            return Model(model_name, 1, 2,
-                         [PopulationVariant(0.33, 1)] * 1)
-
-        if model_name == "abba_toy2":
-            return Model(model_name, 1, 2,
-                         [PopulationVariant(0.66, 1)] * 1)
-
-        if model_name == "abba_toy2_A":
-            return Model(model_name, -1, 0,
-                         [PopulationVariant(1-0.66, -1)] * 1)
-
-        if model_name == "suppressor_toy":
-            return Model(model_name, 1, 2,
-                         [PopulationVariant(0.33, 1)] * 1 +
-                         [PopulationVariant(0.8, -10)] * 1)
-
-        if model_name == "suppressor_toy2":
-            return Model(model_name, 1, 2,
-                         [PopulationVariant(0.66, 1)] * 1 +
-                         [PopulationVariant(0.7, -10)] * 1)
-
-        if model_name == "suppressor_toy3":
-            return Model(model_name, 1, 2,
-                         [PopulationVariant(0.66, 1)] * 1 +
-                         [PopulationVariant(0.5, -10)] * 1)
-
-        if model_name == "suppressor_toy4":
-            return Model(model_name, 1, 2,
-                         [PopulationVariant(0.4, 1)] * 1 +
-                         [PopulationVariant(0.7, -10)] * 1)
-
-        if model_name == "mike_test":
-            return Model(model_name, 59, 60,
-                         [PopulationVariant(0.001, 2)] * 60 +
-                         [PopulationVariant(0.1, 59)] * 1)
-
-        if model_name == "Strong, rare risk":
-            return Model(model_name, 9, 11,
-                         [PopulationVariant(0.05, 1)] * 40 +
-                         [PopulationVariant(0.01, 8)] * 2)
-
-        if model_name == "Uniform low, rare risk":
-            return Model(model_name, 7, 8,
-                         [PopulationVariant(0.05, 1)] * 40)
-
-        if model_name == "Common risk with protection":
-            return Model(model_name, 1, 2,
-                         [PopulationVariant(0.4, 1),
-                          PopulationVariant(0.7, -2)])
-
-        if model_name == "Common risk with protection, and females":
-            return Model(model_name, 1.15, 2,
-                         [PopulationVariant(0.4, 1),
-                          PopulationVariant(0.7, -15)] +
-                         [PopulationVariant(0.5, 0.01)] * 2 +
-                         [PopulationVariant(0.5, -0.01)] * 2)
-
-        if model_name == "weird":
-            return Model(model_name, 3.1, 4.1,
-                         [PopulationVariant(0.98, 1)] * 2 +
-                         [PopulationVariant(0.7, -5)] * 2 +
-                         [PopulationVariant(0.5, 0.001)] * 0 +
-                         [PopulationVariant(0.5, -0.001)] * 0)
-
-        if model_name == "abba simple":
-            return Model(model_name, 13.11, 14,
-                         [PopulationVariant(0.75, 1)] * 7 +
-                         [PopulationVariant(0.2, 0.1)])
-
-        if model_name == "abba simple A":
-            return Model(model_name, 13.11-14, 14-14,
-                         [PopulationVariant(0.25, -1)] * 7 +
-                         [PopulationVariant(0.2, 0.1)])
-
-        if model_name == "wigler another nice":
-            return Model(model_name, 1.99, 2,
-                         [PopulationVariant(0.7, 1)] * 1 +
-                         [PopulationVariant(0.03, 1.6)] * 1 +
-                         [PopulationVariant(0.1, -0.01)] * 16)
-
-        raise Exception(f"Unknown model: {model_name}")
-
-    def generate_population_liability(self, number_of_individuals: int):
-        fs = np.array([pv.f for pv in self.population_variants])
-        ws = np.array([pv.w for pv in self.population_variants])
-        genotypes = (np.random.rand(number_of_individuals, len(fs), 2) <
-                     fs[np.newaxis, :, np.newaxis]).sum(axis=2)
-        liability = genotypes.dot(ws)
-        return liability
-
-    def generate_unaffected_individuals_genotypes(self,
-                                                  number_of_individuals: int,
-                                                  threshold: float):
-        fs = np.array([pv.f for pv in self.population_variants])
-        ws = np.array([pv.w for pv in self.population_variants])
-
-        n_done = 0
-        gen_buff = []
-        n_simulated = 0
-        while n_done < number_of_individuals:
-            genotypes = (np.random.rand(number_of_individuals, len(fs), 2) <
-                         fs[np.newaxis, :, np.newaxis]).sum(axis=2)
-            liability = genotypes.dot(ws)
-            unaffected_idx = liability <= threshold
-            gen_buff.append(genotypes[unaffected_idx, :])
-            n_done += unaffected_idx.sum()
-            n_simulated += number_of_individuals
-            print(f"\t{n_done}/{number_of_individuals} done.")
-        gens = np.vstack(gen_buff)
-        return gens[:number_of_individuals, :], 1.0 - (n_done / n_simulated)
-
-    def sample_family_types(self, number_of_family_types):
-        print(f"Sampling {number_of_family_types} families...")
-        print("  Generating unaffected fathers...")
-        dad_gens_m, dad_initial_risk = \
-            self.generate_unaffected_individuals_genotypes(
-                number_of_family_types, self.male_threshold)
-        print("  Generating unaffected mothers...")
-        mom_gens_m, mom_initial_risk = \
-            self.generate_unaffected_individuals_genotypes(
-                number_of_family_types, self.female_threshold)
-        ws = np.array([pv.w for pv in self.population_variants])
-        family_types_raw: List[FamilyType] = []
-        for dad_gens, mom_gens in zip(dad_gens_m, mom_gens_m):
-            family_types_raw.append(
-                FamilyType(self.male_threshold, self.female_threshold,
-                           list(ws[dad_gens == 2]), list(ws[dad_gens == 1]),
-                           list(ws[mom_gens == 2]), list(ws[mom_gens == 1]))
-            )
-
-        family_types: Dict[Tuple, FamilyType] = {}
-        for ft in family_types_raw:
-            ftk = ft.get_type_key()
-            if ftk in family_types:
-                family_types[ftk].unascertained_weight += 1
-            else:
-                family_types[ftk] = ft
-        self.family_types = sorted(
-            family_types.values(),
-            key=lambda ft: ft.unascertained_weight,
-            reverse=True)
-        self.dad_initial_risk = dad_initial_risk
-        self.mom_initial_risk = mom_initial_risk
-        print(f"Generated {len(self.family_types)} family types.")
-
-    def get_number_of_genotype_types(self):
-        ns = np.array(Counter([(pv.w, pv.f)
-                      for pv in self.population_variants]).values())
-        return ((ns+1)*(ns+2)//2).prod()
-
-    def generate_family_types(self, genotype_type_number=10_000,
-                              family_number=100_000, warn=False) -> bool:
-        locus_types = np.array(
-            [(w, f, n) for (w, f), n in
-             Counter([(pv.w, pv.f)
-                      for pv in self.population_variants]).items()])
-        ws = locus_types[:, 0]
-        fs = locus_types[:, 1]
-        ns = np.array(locus_types[:, 2], dtype=int)
-
-        n_genotypes = ((ns+1)*(ns+2)//2).prod()
-        print(f"  There are {n_genotypes} genotypes.")
-
+        n_genotypes = self.get_number_of_individual_genotypes_types()
         if n_genotypes > genotype_type_number:
             if warn:
                 print(f"WARNING: too many genotype types {n_genotypes}.",
@@ -294,24 +125,9 @@ class Model:
             else:
                 raise Exception("Too many genotype types {n_genotypes}.")
 
-        p_arrays = []
-        g_arrays = []
+        G, P = self.generate_all_individual_genotypes()
 
-        W = np.array([(2*w, w) for w in ws])
-
-        for n, f in zip(ns, fs):
-            A = []
-            for i in range(n+1):
-                for j in range(n+1-i):
-                    A.append((i, j, n-i-j))
-            A = np.array(A)
-            P = stats.multinomial.pmf(A, n, [f*f, 2*f*(1-f), (1-f)*(1-f)])
-            p_arrays.append(P)
-            g_arrays.append(A[:, :2])
-
-        G = cartesian_product_itertools(g_arrays)
-        P = cartesian_product_itertools(p_arrays).prod(axis=1)
-
+        W = np.array([(2*lc.w, lc.w) for lc in self.locus_classes])
         liability = (G*W).sum(axis=(1, 2))
         dad_idx = liability <= self.male_threshold
         mom_idx = liability <= self.female_threshold
@@ -336,22 +152,10 @@ class Model:
                 raise Exception(f"Too many family types {n_families}")
         print(f"Generating all {n_families} family types...")
 
-        def g_to_hom_het(g):
-            hom = []
-            het = []
-            for w, (hm, ht) in zip(ws, g):
-                hom += [w]*hm
-                het += [w]*ht
-            return hom, het
-
-        family_types: Dict[Tuple, FamilyType] = {}
+        family_types: Dict[str, FamilyType] = {}
         for dad_p, dad_g in zip(dad_ps, G[dad_idx]):
-            dad_hom, dad_het = g_to_hom_het(dad_g)
             for mom_p, mom_g in zip(mom_ps, G[mom_idx]):
-                mom_hom, mom_het = g_to_hom_het(mom_g)
-
-                ft = FamilyType(self.male_threshold, self.female_threshold,
-                                dad_hom, dad_het, mom_hom, mom_het)
+                ft = FamilyType(self, mom_g, dad_g)
                 ft.unascertained_weight = dad_p * mom_p
                 assert ft.get_type_key() not in family_types
                 family_types[ft.get_type_key()] = ft
@@ -362,31 +166,6 @@ class Model:
             reverse=True)
 
         return True
-
-    def generate_family_type_statistics(self, number_of_children_per_family):
-        max_hets = max([ft.get_number_of_hets() for ft in self.family_types])
-        transmission = np.random.randint(
-            2, size=(number_of_children_per_family, max_hets),
-            dtype=np.byte)
-
-        with Pool() as p:
-            stats = p.map(
-                partial(
-                    FamilyType.measure_stats,
-                    sim_children_number=number_of_children_per_family,
-                    transmission_buff=transmission),
-                self.family_types)
-        '''
-        stats=[]
-        for fti, ft in enumerate(self.family_types):
-            if (fti % 100) == 0:
-                print("Measuring stats for family type "
-                      f"{fti}/{len(self.family_types)}...")
-            stats.append(
-                ft.measure_stats(number_of_children_per_family,
-                                 transmission_buff=transmission))
-        '''
-        return stats
 
     def compute_stats(self, family_mode="dynamic",
                       genotype_type_number=10_000, family_number=100_000,
@@ -420,13 +199,13 @@ class Model:
 
         # generate family types
         if family_mode == "all":
-            self.generate_family_types(
+            self.generate_all_family_types(
                 genotype_type_number, family_number, warn=True)
         elif family_mode == "sample":
             self.sample_family_types(family_number)
         elif family_mode == "dynamic":
             try:
-                self.generate_family_types(
+                self.generate_all_family_types(
                     genotype_type_number, family_number, warn=False)
             except Exception:
                 self.sample_family_types(family_number)
@@ -434,14 +213,6 @@ class Model:
             raise Exception(f"Unkown family_mode {family_mode}. The known "
                             f"family_modes are all, sample, and dynamic.")
 
-        if children_number == "all":
-            transmission = None
-        else:
-            max_hets = max([ft.get_number_of_hets()
-                            for ft in self.family_types])
-            transmission = np.random.randint(
-                2, size=(children_number, max_hets),
-                dtype=np.byte)
         if n_processes == 1:
             stats = []
             for fti, ft in enumerate(self.family_types):
@@ -449,16 +220,14 @@ class Model:
                     print("Measuring stats for family type "
                           f"{fti}/{len(self.family_types)}...")
                 stats.append(
-                    ft.measure_stats(family_stats_mode, children_number,
-                                     transmission_buff=transmission))
+                    ft.measure_stats(family_stats_mode, children_number))
         else:
             with Pool() as p:
                 stats = p.map(
                     partial(
                         FamilyType.measure_stats,
                         family_stats_mode=family_stats_mode,
-                        children_number=children_number,
-                        transmission_buff=transmission),
+                        children_number=children_number),
                     self.family_types)
         add_acertainment_stats(stats, family_number)
         global_stats = compute_global_stats(stats, self)
@@ -466,56 +235,86 @@ class Model:
 
 
 class FamilyType:
-    def __init__(self,
-                 male_threshold: float, female_threshold: float,
-                 dad_hom_ws: List[float] = [],
-                 dad_het_ws: List[float] = [],
-                 mom_hom_ws: List[float] = [],
-                 mom_het_ws: List[float] = [],
-                 ):
+    def __init__(self, model: Model, mom_genotypes, dad_genotypes):
 
-        self.male_threshold = male_threshold
-        self.female_threshold = female_threshold
-        self.dad_hom_ws = dad_hom_ws
-        self.dad_het_ws = dad_het_ws
-        self.mom_hom_ws = mom_hom_ws
-        self.mom_het_ws = mom_het_ws
+        self.model = model
 
-        self.homozygous_damage_mom = sum(mom_hom_ws)
-        self.homozygous_damage_dad = sum(dad_hom_ws)
+        self.mom_genotypes = mom_genotypes
+        self.dad_genotypes = dad_genotypes
+
+        ws = np.array([lc.w for lc in model.locus_classes])
+        self.homozygous_damage_mom = ws.dot(self.mom_genotypes[:, 0])
+        self.homozygous_damage_dad = ws.dot(self.dad_genotypes[:, 0])
 
         self.unascertained_weight = 1
 
-    def get_type_key(self) -> Tuple:
-        return tuple([",".join(map(str, ws)) for ws in [self.dad_hom_ws,
-                                                        self.dad_het_ws,
-                                                        self.mom_hom_ws,
-                                                        self.mom_het_ws]])
+        het_types_list = \
+            [(1, lc.w, het_n)
+             for lc, het_n in zip(self.model.locus_classes,
+                                  self.dad_genotypes[:, 1]) if het_n > 0] + \
+            [(0, lc.w, het_n)
+             for lc, het_n in zip(self.model.locus_classes,
+                                  self.mom_genotypes[:, 1]) if het_n > 0]
+        if het_types_list:
+            het_types = np.array(het_types_list)
+        else:
+            het_types = np.array(het_types_list).reshape(0, 3)
+
+        self.het_mom = het_types[:, 0] == 0
+        self.het_dad = het_types[:, 0] == 1
+        self.het_ws = het_types[:, 1]
+        self.het_ns = np.array(het_types[:, 2], dtype=int)
+
+    def get_type_key(self) -> str:
+        def g2s(gens):
+            return ":".join([",".join(map(str, g)) for g in gens])
+        return g2s(self.mom_genotypes) + "|" + g2s(self.dad_genotypes)
 
     def get_number_of_hets(self):
-        return len(self.dad_het_ws) + len(self.mom_het_ws)
+        return self.mom_genotypes[:, 1].sum() + self.dad_genotypes[:, 1].sum()
 
     def get_number_of_child_types(self):
-        types_n = np.array(
-            [n for _, n in Counter(self.dad_het_ws).items()] +
-            [n for _, n in Counter(self.mom_het_ws).items()])
+        het_ns = np.array([self.mom_genotypes[:, 1], self.dad_genotypes[:, 1]])
+        return (het_ns+1).prod()
 
-        return (types_n+1).prod()
+    def generate_all_child_types(self):
+        if len(self.het_ns) == 0:
+            return np.array([[]], dtype=int), np.array([1.0])
+        p_arrays = []
+        g_arrays = []
 
-    def measure_stats_analytical(self):
+        for n in self.het_ns:
+            gs = np.arange(n+1, dtype=int)
+            g_arrays.append(gs)
+            p_arrays.append(stats.binom.pmf(gs, n, 0.5))
+        GS = cartesian_product_pp(g_arrays)
+        PS = cartesian_product_pp(p_arrays).prod(axis=1)
 
-        if len(self.mom_het_ws) + len(self.dad_het_ws) == 0:
+        return GS, PS
+
+    def sample_child_types(self, number_of_children):
+        if len(self.het_ns) == 0:
+            return np.array([[]], dtype=int), np.array([1.0])
+        buff = [stats.binom.rvs(n, 0.5, size=number_of_children)
+                for n in self.het_ns]
+        all_GS = np.array(buff).T
+
+        GS, PS = np.unique(all_GS, axis=0, return_counts=True)
+        PS = PS / number_of_children
+        return GS, PS
+
+    def measure_stats(self, family_stats_mode="dynamic",
+                      children_number: int = 100_000):
+
+        if self.get_number_of_hets() == 0:
             liability = self.homozygous_damage_mom + self.homozygous_damage_dad
-            male_risk = 1.0 if liability > self.male_threshold else 0.0
-            female_risk = 1.0 if liability > self.female_threshold else 0.0
+            male_risk = 1.0 if liability > self.model.male_threshold else 0.0
+            female_risk = 1.0 if liability > self.model.female_threshold else 0.0
 
             return {
                 'family_type_key': self.get_type_key(),
                 'unascertained_weight': self.unascertained_weight,
-                'dad_hom_ws': ",".join(map(str, self.dad_hom_ws)),
-                'dad_het_ws': ",".join(map(str, self.dad_het_ws)),
-                'mom_hom_ws': ",".join(map(str, self.mom_hom_ws)),
-                'mom_het_ws': ",".join(map(str, self.mom_het_ws)),
+                'prediction_method': 'precise',
                 'male_risk': male_risk,
                 'female_risk': female_risk,
                 'ma_ma_mom_SLC_mean': 0,
@@ -524,29 +323,33 @@ class FamilyType:
                 'mu_ma_dad_SLC_mean': 0
             }
 
-        het_types = np.array(
-            [(1, w, n) for w, n in Counter(self.dad_het_ws).items()] +
-            [(0, w, n) for w, n in Counter(self.mom_het_ws).items()])
-        # n_child_types = (types_n+1).prod()
+        if family_stats_mode == "all":
+            if self.get_number_of_child_types() > children_number:
+                print(f"WARNING: Family {self.get_type_key()} has "
+                      f"{self.get_number_of_child_types()}, more than "
+                      f"{children_number}", file=sys.stderr)
+            prediction_method = 'precise'
+        elif family_stats_mode == "sample":
+            prediction_method = 'sample'
+        elif family_stats_mode == "dynamic":
+            if self.get_number_of_child_types() < children_number:
+                prediction_method = 'precise'
+            else:
+                prediction_method = 'sample'
+        else:
+            raise Exception(f"Unknown family_stats_mode {family_stats_mode}."
+                            f"The family_stats_mode should be all, sample, "
+                            f"or dynamic.")
 
-        mom_type = het_types[:, 0] == 0
-        dad_type = het_types[:, 0] == 1
-        types_ws = het_types[:, 1]
-        types_n = np.array(het_types[:, 2], dtype=int)
-        p_arrays = []
-        g_arrays = []
+        if prediction_method == 'precise':
+            GS, PS = self.generate_all_child_types()
+        else:
+            GS, PS = self.sample_child_types(children_number)
 
-        for p, w, n in het_types:
-            gs = np.arange(n+1)
-            g_arrays.append(gs)
-            p_arrays.append(stats.binom.pmf(gs, n, 0.5))
-        GS = cartesian_product_pp(g_arrays)
-        PS = cartesian_product_pp(p_arrays).prod(axis=1)
-
-        liability = (GS * types_ws).sum(axis=1) + \
+        liability = (GS * self.het_ws).sum(axis=1) + \
             self.homozygous_damage_mom + self.homozygous_damage_dad
-        male_risk = PS[liability > self.male_threshold].sum()
-        female_risk = PS[liability > self.female_threshold].sum()
+        male_risk = PS[liability > self.model.male_threshold].sum()
+        female_risk = PS[liability > self.model.female_threshold].sum()
 
         def compute_fs(idx):
             if all(np.logical_not(idx)):
@@ -554,116 +357,26 @@ class FamilyType:
             GSS = GS[idx, :]
             PSS = PS[idx]
 
-            fs = (GSS / types_n * PSS[np.newaxis].T).sum(axis=0) / PSS.sum()
+            fs = (GSS / self.het_ns *
+                  PSS[np.newaxis].T).sum(axis=0) / PSS.sum()
             return fs
 
-        ma_fs = compute_fs(liability > self.male_threshold)
-        mu_fs = compute_fs(liability <= self.male_threshold)
+        ma_fs = compute_fs(liability > self.model.male_threshold)
+        mu_fs = compute_fs(liability <= self.model.male_threshold)
 
-        ma_ma_sharing = (ma_fs**2 + (1-ma_fs)**2) * types_n
-        mu_ma_sharing = (ma_fs*mu_fs + (1-ma_fs)*(1-mu_fs)) * types_n
-
-        MLN = (mom_type * types_n).sum()
-        DLN = (dad_type * types_n).sum()
+        mC_netSCLs = (2*(ma_fs**2 + (1-ma_fs)**2) - 1) * self.het_ns
+        mD_netSCLs = (2*(ma_fs*mu_fs + (1-ma_fs)*(1-mu_fs)) - 1) * self.het_ns
 
         return {
             'family_type_key': self.get_type_key(),
             'unascertained_weight': self.unascertained_weight,
-            'dad_hom_ws': ",".join(map(str, self.dad_hom_ws)),
-            'dad_het_ws': ",".join(map(str, self.dad_het_ws)),
-            'mom_hom_ws': ",".join(map(str, self.mom_hom_ws)),
-            'mom_het_ws': ",".join(map(str, self.mom_het_ws)),
+            'prediction_method': prediction_method,
             'male_risk': male_risk,
             'female_risk': female_risk,
-            'ma_ma_mom_SLC_mean': 2*ma_ma_sharing[mom_type].sum() - MLN,
-            'ma_ma_dad_SLC_mean': 2*ma_ma_sharing[dad_type].sum() - DLN,
-            'mu_ma_mom_SLC_mean': 2*mu_ma_sharing[mom_type].sum() - MLN,
-            'mu_ma_dad_SLC_mean': 2*mu_ma_sharing[dad_type].sum() - DLN
-        }
-
-    def measure_stats(self, family_stats_mode="dynamic",
-                      children_number: int = 100_000,
-                      transmission_buff: Optional[np.ndarray] = None):
-        if family_stats_mode == "all":
-            if self.get_number_of_child_types() > children_number:
-                print(f"WARNING: Family {self.get_type_key()} has "
-                      f"{self.get_number_of_child_types()}, more than "
-                      f"{children_number}", file=sys.stderr)
-            return self.measure_stats_analytical()
-        elif family_stats_mode == "sample":
-            return self.measure_stats_by_simulation(
-                children_number, transmission_buff)
-        elif family_stats_mode == "dynamic":
-            if self.get_number_of_child_types() < children_number:
-                return self.measure_stats_analytical()
-            else:
-                return self.measure_stats_by_simulation(
-                    children_number, transmission_buff)
-        else:
-            raise Exception(f"Unknown family_stats_mode {family_stats_mode}."
-                            f"The family_stats_mode should be all, sample, "
-                            f"or dynamic.")
-
-    def measure_stats_by_simulation(
-            self, sim_children_number: int,
-            transmission_buff: Optional[np.ndarray] = None):
-        ws = np.array(self.dad_het_ws + self.mom_het_ws)
-        dad_locus = np.zeros(len(ws), dtype=bool)
-        dad_locus[:len(self.dad_het_ws)] = True
-        mom_locus = np.logical_not(dad_locus)
-
-        if transmission_buff is None:
-            transmission = np.random.randint(
-                2, size=(sim_children_number, len(ws)))
-        else:
-            assert transmission_buff.shape[0] == sim_children_number
-            assert transmission_buff.shape[1] >= len(ws)
-            transmission = transmission_buff[:, :len(ws)]
-
-        liability = (transmission * ws).sum(axis=1) + \
-            self.homozygous_damage_mom + self.homozygous_damage_dad
-
-        idx = {
-            "MU": liability <= self.male_threshold,
-            "MA": liability > self.male_threshold,
-            "FU": liability <= self.female_threshold,
-            "FA": liability > self.female_threshold
-        }
-        idx_i = {k: np.where(v)[0] for k, v in idx.items()}
-
-        if len(idx_i['MA']):
-            ma_fs = transmission[idx["MA"], :].mean(axis=0)
-        else:
-            ma_fs = np.zeros(transmission.shape[1])
-
-        # print("ma_fs", ma_fs)
-        if len(idx_i['MU']):
-            mu_fs = transmission[idx["MU"], :].mean(axis=0)
-        else:
-            mu_fs = np.zeros(transmission.shape[1])
-
-        male_risk = len(idx_i['MA']) / sim_children_number
-        female_risk = len(idx_i['FA']) / sim_children_number
-
-        ma_ma_sharing = ma_fs**2 + (1-ma_fs)**2
-        mu_ma_sharing = ma_fs*mu_fs + (1-ma_fs)*(1-mu_fs)
-
-        MLN = mom_locus.sum()
-        DLN = dad_locus.sum()
-
-        return {
-            'family_type_key': self.get_type_key(),
-            'unascertained_weight': self.unascertained_weight,
-            'dad_hom_ws': ",".join(map(str, self.dad_hom_ws)),
-            'dad_het_ws': ",".join(map(str, self.dad_het_ws)),
-            'mom_hom_ws': ",".join(map(str, self.mom_hom_ws)),
-            'mom_het_ws': ",".join(map(str, self.mom_het_ws)),
-            'male_risk': male_risk,
-            'female_risk': female_risk,
-            'ma_ma_mom_SLC_mean': 2*ma_ma_sharing[mom_locus].sum() - MLN,
-            'ma_ma_dad_SLC_mean': 2*ma_ma_sharing[dad_locus].sum() - DLN,
-            'mu_ma_mom_SLC_mean': 2*mu_ma_sharing[mom_locus].sum() - MLN,
-            'mu_ma_dad_SLC_mean': 2*mu_ma_sharing[dad_locus].sum() - DLN
+            'ma_ma_mom_SLC_mean': mC_netSCLs[self.het_mom].sum(),
+            'ma_ma_dad_SLC_mean': mC_netSCLs[self.het_dad].sum(),
+            'mu_ma_mom_SLC_mean': mD_netSCLs[self.het_mom].sum(),
+            'mu_ma_dad_SLC_mean': mD_netSCLs[self.het_dad].sum()
         }
 
 
@@ -746,11 +459,12 @@ def compute_global_stats(all_stats, model: Model):
     global_stats['Model']['name'] = model.model_name
     global_stats['Model']['male threshold'] = model.male_threshold
     global_stats['Model']['female threshold'] = model.female_threshold
-    global_stats['Model']['population variants number'] = len(
-        model.population_variants)
-    pv_cnts = Counter([(pv.f, pv.w) for pv in model.population_variants])
-    for pvi, ((f, w), n) in enumerate(pv_cnts.items()):
-        global_stats['Model'][f'population variant class {pvi}'] = f"w={w}, f={f}, n={n}"
+    global_stats['Model']['population variants number'] = \
+        model.get_number_of_loci()
+
+    for lci, lc in enumerate(model.locus_classes):
+        global_stats['Model'][f'population variant class {lci}'] = \
+            f"w={lc.w}, f={lc.f}, n={lc.n}"
 
     NF = float(sum([ft.unascertained_weight for ft in model.family_types]))
     global_stats['Model']['number of families'] = NF
@@ -776,12 +490,12 @@ def compute_global_stats(all_stats, model: Model):
         global_stats[ft_str]['male risk'] = male_risk
         global_stats[ft_str]['female risk'] = female_risk
         if ft_str == "Unascertained":
-            global_stats[ft_str]['two boys, both affected, proportion'] = \
-                float(male_risk * male_risk)
-            global_stats[ft_str]['two boys, one affected, proportion'] = \
-                float(2 * male_risk * (1-male_risk))
-            global_stats[ft_str]['two boys, none affected, proportion'] = \
-                float((1-male_risk) * (1-male_risk))
+            global_stats[ft_str]['two boys, both affected, proportion'] = float(
+                male_risk * male_risk)
+            global_stats[ft_str]['two boys, one affected, proportion'] = float(
+                2 * male_risk * (1-male_risk))
+            global_stats[ft_str]['two boys, none affected, proportion'] = float(
+                (1-male_risk) * (1-male_risk))
         else:
             global_stats[ft_str]['sharing of the father'] = weighted_average(
                 f'{ft_pref}_dad_SLC_mean', w_att)
@@ -1076,7 +790,7 @@ def cli(cli_args=None):
 
             'sample' - sampe childrent_number children for each family.
 
-            'dynamic' - if the number of children is less than children_number, 
+            'dynamic' - if the number of children is less than children_number,
             generate all childrent.
             Otherwise, sample children_number children''')
     parser.add_argument("-cn", "--children_number", type=int, default=1_000_000,
