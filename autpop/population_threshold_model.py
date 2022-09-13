@@ -166,7 +166,7 @@ class Model:
             else:
                 raise Exception(f"Too many family types {n_families}")
 
-        family_type_set = FamilyTypeSet(description)
+        family_type_set = FamilyTypeSet(self, description)
         for dad_p, dad_g in zip(dadPs, dadGs):
             for mom_p, mom_g in zip(momPs, momGs):
                 ft = FamilyType(self, mom_g, dad_g)
@@ -254,7 +254,8 @@ class Model:
 
 
 class FamilyTypeSet:
-    def __init__(self, description):
+    def __init__(self, model, description):
+        self.model = model
         self.description = description
         self.family_types: List[FamilyType] = []
         self.family_type_set_probabilities = []
@@ -424,10 +425,10 @@ class FamilyType:
                 'prediction_method': 'precise',
                 'male_risk': male_risk,
                 'female_risk': female_risk,
-                'ma_ma_mom_SLC_mean': 0,
-                'ma_ma_dad_SLC_mean': 0,
-                'mu_ma_mom_SLC_mean': 0,
-                'mu_ma_dad_SLC_mean': 0
+                'mC_mom_netSCLs': 0,
+                'mC_dad_netSCLs': 0,
+                'mD_mom_netSCLs': 0,
+                'mD_dad_netSCLs': 0
             }
 
         if family_stats_mode == "all":
@@ -484,10 +485,10 @@ class FamilyType:
             'prediction_method': prediction_method,
             'male_risk': male_risk,
             'female_risk': female_risk,
-            'ma_ma_mom_SLC_mean': mC_netSCLs[self.het_mom].sum(),
-            'ma_ma_dad_SLC_mean': mC_netSCLs[self.het_dad].sum(),
-            'mu_ma_mom_SLC_mean': mD_netSCLs[self.het_mom].sum(),
-            'mu_ma_dad_SLC_mean': mD_netSCLs[self.het_dad].sum()
+            'mC_mom_netSCLs': mC_netSCLs[self.het_mom].sum(),
+            'mC_dad_netSCLs': mC_netSCLs[self.het_dad].sum(),
+            'mD_mom_netSCLs': mD_netSCLs[self.het_mom].sum(),
+            'mD_dad_netSCLs': mD_netSCLs[self.het_dad].sum()
         }
 
 
@@ -564,23 +565,28 @@ def save_stats(all_stats, file_name: Optional[pathlib.Path] = None):
         F.close()
 
 
-def compute_global_stats(all_stats, model: Model):
+def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
+                         female_initial_risk: Optional[float],
+                         male_initial_risk: Optional[float]):
+
+    model = family_type_set.model
     global_stats = defaultdict(dict)
 
     global_stats['Model']['name'] = model.model_name
     global_stats['Model']['male threshold'] = model.male_threshold
     global_stats['Model']['female threshold'] = model.female_threshold
-    global_stats['Model']['population variants number'] = model.get_number_of_loci()
+    global_stats['Model']['population variants number'] = \
+        model.get_number_of_loci()
 
     for lci, lc in enumerate(model.locus_classes):
-        global_stats['Model'][f'population variant class {lci}'] = f"w={lc.w}, f={lc.f}, n={lc.n}"
+        global_stats['Model'][f'population variant class {lci}'] = \
+            f"w={lc.w}, f={lc.f}, n={lc.n}"
 
-    NF = float(sum([ft.unascertained_weight for ft in model.family_types]))
-    global_stats['Model']['number of families'] = NF
-    global_stats['Model']['number of family types'] = len(model.family_types)
+    global_stats['Model']['number of family types'] = len(all_stats)
 
-    global_stats['Initial']['male risk'] = float(model.dad_initial_risk)
-    global_stats['Initial']['female risk'] = float(model.mom_initial_risk)
+    if female_initial_risk is not None or male_initial_risk is not None:
+        global_stats['Initial']['male risk'] = male_initial_risk
+        global_stats['Initial']['female risk'] = female_initial_risk
 
     def weighted_average(att, w_att):
         w_sum = sum([stats[w_att] for stats in all_stats])
@@ -589,27 +595,27 @@ def compute_global_stats(all_stats, model: Model):
         return float(w_ave)
 
     for ft_str, ft_pref in [
-            ("Unascertained", None),
-            ("Families with two affected boys", 'ma_ma'),
-            ("Families with one affected one unaffected boy", 'mu_ma')]:
-        w_att = 'unascertained_weight'if ft_pref is None else f'{ft_pref}_weight'
+            ("Unascertained", 'U'),
+            ("Families with two affected boys", 'C'),
+            ("Families with one affected one unaffected boy", 'D')]:
+        w_att = f'p{ft_pref}'
 
         male_risk = weighted_average('male_risk', w_att)
         female_risk = weighted_average('female_risk', w_att)
         global_stats[ft_str]['male risk'] = male_risk
         global_stats[ft_str]['female risk'] = female_risk
         if ft_str == "Unascertained":
-            global_stats[ft_str]['two boys, both affected, proportion'] = float(
-                male_risk * male_risk)
-            global_stats[ft_str]['two boys, one affected, proportion'] = float(
-                2 * male_risk * (1-male_risk))
-            global_stats[ft_str]['two boys, none affected, proportion'] = float(
-                (1-male_risk) * (1-male_risk))
+            global_stats[ft_str]['two boys, both affected, proportion'] = \
+                float(male_risk * male_risk)
+            global_stats[ft_str]['two boys, one affected, proportion'] = \
+                float(2 * male_risk * (1-male_risk))
+            global_stats[ft_str]['two boys, none affected, proportion'] = \
+                float((1-male_risk) * (1-male_risk))
         else:
             global_stats[ft_str]['sharing of the father'] = weighted_average(
-                f'{ft_pref}_dad_SLC_mean', w_att)
+                f'm{ft_pref}_dad_netSCLs', w_att)
             global_stats[ft_str]['sharing of the mother'] = weighted_average(
-                f'{ft_pref}_mom_SLC_mean', w_att)
+                f'm{ft_pref}_mom_netSCLs', w_att)
     return global_stats
 
 

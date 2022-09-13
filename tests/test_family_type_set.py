@@ -1,5 +1,5 @@
-from re import A
 from autpop.population_threshold_model import Model, LocusClass
+from autpop.population_threshold_model import save_stats
 
 
 def test_all_families_one_locus_class():
@@ -40,4 +40,5 @@ def test_add_family_set_specific_stats():
     all_stats = fts.compute_all_family_specific_stats()
     fts.add_family_set_specific_stats(all_stats)
 
+    save_stats(all_stats)
     assert 'pU' in all_stats[0]
