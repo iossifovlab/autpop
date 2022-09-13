@@ -1,14 +1,14 @@
 * (DONE) Add the n_processes command line argument
 * (DONE) Add the all_families command line argument
 
-* Add the following properties to teh family specific stats
+* (DONE) Add the following properties to teh family specific stats
     * parents_affected
     * mom_liability
     * dad_liability
     * mom_affected
     * dad_affected
 
-* Check, if the paper results are reproduced 
+* (DONE) Check, if the paper results are reproduced 
 for the precise computation!
 
 

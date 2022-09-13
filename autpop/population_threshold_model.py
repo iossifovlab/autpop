@@ -322,7 +322,7 @@ class FamilyType:
         return self.dad_liability > self.model.male_threshold
 
     def is_mom_affected(self):
-        return self.dad_liability > self.model.male_threshold
+        return self.mom_liability > self.model.female_threshold
 
     def are_parents_unaffected(self):
         return (not self.is_dad_affected()) and (not self.is_mom_affected())
@@ -378,21 +378,15 @@ class FamilyType:
                 children_number, generate all children.
                 Otherwise, sample children_number children.
         '''
-        if self.get_number_of_hets() == 0:
-            liability = self.homozygous_damage_mom + self.homozygous_damage_dad
-            male_risk = 1.0 if liability > self.model.male_threshold else 0.0
-            female_risk = 1.0 if liability > self.model.female_threshold else 0.0
 
-            return {
-                'family_type_key': self.get_type_key(),
-                'prediction_method': 'precise',
-                'male_risk': male_risk,
-                'female_risk': female_risk,
-                'mC_mom_netSCLs': 0,
-                'mC_dad_netSCLs': 0,
-                'mD_mom_netSCLs': 0,
-                'mD_dad_netSCLs': 0
-            }
+        family_stats = {
+            'family_type_key': self.get_type_key(),
+            'parents_affected': not self.are_parents_unaffected(),
+            'mom_liability': self.mom_liability,
+            'mom_affected': self.is_mom_affected(),
+            'dad_liability': self.dad_liability,
+            'dad_affected': self.is_dad_affected()
+        }
 
         if family_stats_mode == "all":
             if self.get_number_of_child_types() > children_number:
@@ -427,6 +421,10 @@ class FamilyType:
         male_risk = PS[liability > self.model.male_threshold].sum()
         female_risk = PS[liability > self.model.female_threshold].sum()
 
+        family_stats['prediction_method'] = prediction_method
+        family_stats['male_risk'] = male_risk
+        family_stats['female_risk'] = female_risk
+
         def compute_fs(idx):
             if all(np.logical_not(idx)):
                 return np.zeros(GS.shape[1])
@@ -443,16 +441,12 @@ class FamilyType:
         mC_netSCLs = (2*(ma_fs**2 + (1-ma_fs)**2) - 1) * self.het_ns
         mD_netSCLs = (2*(ma_fs*mu_fs + (1-ma_fs)*(1-mu_fs)) - 1) * self.het_ns
 
-        return {
-            'family_type_key': self.get_type_key(),
-            'prediction_method': prediction_method,
-            'male_risk': male_risk,
-            'female_risk': female_risk,
-            'mC_mom_netSCLs': mC_netSCLs[self.het_mom].sum(),
-            'mC_dad_netSCLs': mC_netSCLs[self.het_dad].sum(),
-            'mD_mom_netSCLs': mD_netSCLs[self.het_mom].sum(),
-            'mD_dad_netSCLs': mD_netSCLs[self.het_dad].sum()
-        }
+        family_stats['mC_mom_netSCLs'] = mC_netSCLs[self.het_mom].sum()
+        family_stats['mC_dad_netSCLs'] = mC_netSCLs[self.het_dad].sum()
+        family_stats['mD_mom_netSCLs'] = mD_netSCLs[self.het_mom].sum()
+        family_stats['mD_dad_netSCLs'] = mD_netSCLs[self.het_dad].sum()
+
+        return family_stats
 
 
 def save_stats(all_stats, file_name: Optional[pathlib.Path] = None):
@@ -471,8 +465,8 @@ def save_stats(all_stats, file_name: Optional[pathlib.Path] = None):
 
 
 def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
-                         female_initial_risk: Optional[float],
-                         male_initial_risk: Optional[float]):
+                         female_initial_risk: Optional[float] = None,
+                         male_initial_risk: Optional[float] = None):
 
     model = family_type_set.model
     global_stats = defaultdict(dict)
@@ -659,7 +653,7 @@ def cli(cli_args=None):
                         "available cores are used.")
     parser.add_argument("-r", "--runs", type=int, default=1,
                         help="number of runs per model")
-    parser.add_argument("--all_families", type=bool, default=False,
+    parser.add_argument("-af", "--all_families", action="store_true",
                         help="When --all_families is True, all families, "
                         "including the ones with affected parents will be "
                         "included in the in family stats files. Otherwise, "
@@ -694,7 +688,8 @@ def cli(cli_args=None):
                 args.all_families, args.warn)
 
             family_stats = family_type_set.compute_family_stats(
-                args.children_number, args.warn, args.n_processes)
+                args.children_mode, args.children_number,
+                args.warn, args.n_processes)
 
             global_stats = compute_global_stats(family_stats, family_type_set,
                                                 female_risk, male_risk)
