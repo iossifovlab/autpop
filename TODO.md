@@ -12,13 +12,13 @@
 for the precise computation!
 
 
-* Add the following section to the global stats
+* (DONE) Add the following section to the global stats
     Prediction method description
-        precice: True or Fase
+        precice: True or False
         family set description
         number of family types
         number of family types with sampling
 
-* If predictions of the first run are precise, don't run more
+* (DONE) If predictions of the first run are precise, don't run more
 
-* Implement the family sampling mode!!!
+* Implement the family sampling mode

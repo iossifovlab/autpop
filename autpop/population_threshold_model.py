@@ -164,7 +164,7 @@ class Model:
             else:
                 raise Exception(f"Too many family types {n_families}")
 
-        family_type_set = FamilyTypeSet(self, description)
+        family_type_set = FamilyTypeSet(self, description, 'precise')
         for dad_p, dad_g in zip(dadPs, dadGs):
             for mom_p, mom_g in zip(momPs, momGs):
                 ft = FamilyType(self, mom_g, dad_g)
@@ -195,23 +195,30 @@ class Model:
                 genotype_type_number, family_number,
                 all_families=all_families, warn=warn)
         elif family_mode == "sample":
-            return self.sample_family_types(family_number)
+            raise Exception("NOT YET!!!")
+            # return self.sample_family_types(family_number)
         elif family_mode == "dynamic":
             try:
                 return self.generate_all_family_types(
                     genotype_type_number, family_number,
                     all_families=all_families, warn=False)
             except Exception:
-                return self.sample_family_types(family_number)
+                raise Exception("NOT YET!!!")
+                # return self.sample_family_types(family_number)
         else:
             raise Exception(f"Unkown family_mode {family_mode}. The known "
                             f"family_modes are all, sample, and dynamic.")
 
 
 class FamilyTypeSet:
-    def __init__(self, model, description):
+    def __init__(self, model: Model, description: str, method: str):
+        '''
+        method should be 'precise' or 'sample'
+        '''
         self.model = model
         self.description = description
+        self.method = method
+        assert method in ['precise', 'sample']
         self.family_types: List[FamilyType] = []
         self.family_type_set_probabilities = []
         self.ft_key_to_index: Dict[str, int] = {}
@@ -481,16 +488,36 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
         global_stats['Model'][f'population variant class {lci}'] = \
             f"w={lc.w}, f={lc.f}, n={lc.n}"
 
-    global_stats['Model']['number of family types'] = len(all_stats)
+    n_families_with_sample_based_predictions = \
+        len([1 for st in all_stats
+             if st['prediction_method'] == 'sample'])
+
+    n_unaffected_parents_families_with_sample_based_predictions = \
+        len([1 for st in all_stats
+             if st['prediction_method'] == 'sample' and
+             not st['parents_affected']])
+    global_stats['Prediction method'] = {
+
+        'precise': family_type_set.method == 'precise' and
+        n_unaffected_parents_families_with_sample_based_predictions == 0,
+        'family set description': family_type_set.description,
+        'number of family types': len(all_stats),
+        'number of family types with sampling':
+        n_families_with_sample_based_predictions,
+        'number of unaffected-parents family types':
+        len([1 for st in all_stats if not st['parents_affected']]),
+        'number of unaffected-parents family types with sampling':
+        n_unaffected_parents_families_with_sample_based_predictions
+    }
 
     if female_initial_risk is not None or male_initial_risk is not None:
         global_stats['Initial']['male risk'] = male_initial_risk
         global_stats['Initial']['female risk'] = female_initial_risk
 
     def weighted_average(att, w_att):
-        w_sum = sum([stats[w_att] for stats in all_stats])
-        w_ave = sum([stats[att]*stats[w_att]
-                     for stats in all_stats if stats[w_att] > 0]) / w_sum
+        w_sum = sum([st[w_att] for st in all_stats])
+        w_ave = sum([st[att]*st[w_att]
+                     for st in all_stats if st[w_att] > 0]) / w_sum
         return float(w_ave)
 
     for ft_str, ft_pref in [
@@ -511,10 +538,10 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
             global_stats[ft_str]['two boys, none affected, proportion'] = \
                 float((1-male_risk) * (1-male_risk))
         else:
-            global_stats[ft_str]['sharing of the father'] = weighted_average(
-                f'm{ft_pref}_dad_netSCLs', w_att)
-            global_stats[ft_str]['sharing of the mother'] = weighted_average(
-                f'm{ft_pref}_mom_netSCLs', w_att)
+            global_stats[ft_str]['sharing of the father'] = \
+                weighted_average(f'm{ft_pref}_dad_netSCLs', w_att)
+            global_stats[ft_str]['sharing of the mother'] = \
+                weighted_average(f'm{ft_pref}_mom_netSCLs', w_att)
     return global_stats
 
 
@@ -569,9 +596,10 @@ def save_global_stats_table(GSB, file_name: Optional[pathlib.Path] = None,
             cs += [bb.strip(" ").split("=")[1]
                    for bb in GS['Model'][pvK].split(",")]
             if pvi == 0:
-                for section in ['Initial', 'Unascertained',
-                                'Families with two affected boys',
-                                'Families with one affected one unaffected boy']:
+                for section in \
+                    ['Initial', 'Unascertained',
+                     'Families with two affected boys',
+                     'Families with one affected one unaffected boy']:
                     for gender in ['male', 'female']:
                         param = f'{gender} risk'
                         if prec:
@@ -642,8 +670,8 @@ def cli(cli_args=None):
                         "(see --family_mode and --children_mode arguments)."
                         "In these cases, the --warn controlls the behavious "
                         "when the number of famililes or children exceed the "
-                        "limits set by the --family_number, --children_number, "
-                        "--genotype_number aguments. If --warn is True, a "
+                        "limits set by the --family_number, --children_number,"
+                        " --genotype_number aguments. If --warn is True, a "
                         "a warning will be printed; if --warn is False, an "
                         "error message will be printed and the tool will "
                         "terminate.")
@@ -700,4 +728,7 @@ def cli(cli_args=None):
             save_global_stats(global_stats,
                               res_dir / f"global_stats_{model.model_name}")
             GSB.append(global_stats)
+            if global_stats['Prediction method']['precise']:
+                assert run == 0
+                break
     save_global_stats_table(GSB, out_dir / "models_results.txt")
