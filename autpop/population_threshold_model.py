@@ -1,18 +1,16 @@
 from __future__ import annotations
-from collections import Counter, defaultdict
-from functools import partial
-from typing import List, NamedTuple, Dict, Optional, Tuple, Any
-from multiprocessing import Pool
-import numpy as np
-import pylab as pl
-import scipy.stats as stats
-from matplotlib.patches import Rectangle
-import pathlib
-import sys
-from .cartisian import cartesian_product_pp, cartesian_product_itertools
 import yaml
 import argparse
 import os
+import sys
+import pathlib
+from typing import List, NamedTuple, Dict, Optional, Tuple, Any
+from collections import defaultdict
+from functools import partial
+from multiprocessing import Pool
+import numpy as np
+import scipy.stats as stats
+from .cartisian import cartesian_product_pp, cartesian_product_itertools
 
 
 class LocusClass(NamedTuple):
@@ -197,60 +195,17 @@ class Model:
                 genotype_type_number, family_number,
                 all_families=all_families, warn=warn)
         elif family_mode == "sample":
-            self.sample_family_types(family_number)
+            return self.sample_family_types(family_number)
         elif family_mode == "dynamic":
             try:
                 return self.generate_all_family_types(
                     genotype_type_number, family_number,
                     all_families=all_families, warn=False)
             except Exception:
-                self.sample_family_types(family_number)
+                return self.sample_family_types(family_number)
         else:
             raise Exception(f"Unkown family_mode {family_mode}. The known "
                             f"family_modes are all, sample, and dynamic.")
-        raise Exception('breh')
-
-    def compute_stats(self, family_mode="dynamic",
-                      genotype_type_number=10_000, family_number=100_000,
-                      family_stats_mode="dynamic",
-                      children_number=100_000,
-                      n_processes=None):
-
-        # generate family types
-        if family_mode == "all":
-            self.generate_all_family_types(
-                genotype_type_number, family_number, warn=True)
-        elif family_mode == "sample":
-            self.sample_family_types(family_number)
-        elif family_mode == "dynamic":
-            try:
-                self.generate_all_family_types(
-                    genotype_type_number, family_number, warn=False)
-            except Exception:
-                self.sample_family_types(family_number)
-        else:
-            raise Exception(f"Unkown family_mode {family_mode}. The known "
-                            f"family_modes are all, sample, and dynamic.")
-
-        if n_processes == 1:
-            stats = []
-            for fti, ft in enumerate(self.family_types):
-                if (fti % 100) == 0:
-                    print("Measuring stats for family type "
-                          f"{fti}/{len(self.family_types)}...")
-                stats.append(
-                    ft.measure_stats(family_stats_mode, children_number))
-        else:
-            with Pool() as p:
-                stats = p.map(
-                    partial(
-                        FamilyType.measure_stats,
-                        family_stats_mode=family_stats_mode,
-                        children_number=children_number),
-                    range(self.get_number_of_individual_genotypes_types()))
-        add_acertainment_stats(stats, family_number)
-        global_stats = compute_global_stats(stats, self)
-        return stats, global_stats
 
 
 class FamilyTypeSet:
@@ -278,20 +233,18 @@ class FamilyTypeSet:
     def get_family_type_number(self):
         return len(self.family_types)
 
+    def compute_family_stats(self, family_stats_mode="dynamic",
+                             children_number=100_000, warn=True,
+                             n_processes=None):
+        stats = self.compute_all_family_specific_stats(
+            family_stats_mode, children_number, warn, n_processes)
+        self.add_family_set_specific_stats(stats)
+        return stats
+
     def compute_all_family_specific_stats(self, family_stats_mode="dynamic",
                                           children_number=100_000, warn=True,
                                           n_processes=None):
-        '''
-            family_stats_mode=all
-                Generate all children. Warn if the number of children is
-                larger than children number.
-            family_stats_mode=sample
-                Sample children_number children.
-            family_stats_mode=dynamic
-                If the number of posible children types is less than
-                children_number, generate all children.
-                Otherwise, sample children_number children.
-        '''
+
         if n_processes == 1:
             stats = []
             for fti, ft in enumerate(self.family_types):
@@ -414,7 +367,17 @@ class FamilyType:
 
     def measure_stats(self, family_stats_mode="dynamic",
                       children_number: int = 100_000, warn=True):
-
+        '''
+            family_stats_mode=all
+                Generate all children. Warn if the number of children is
+                larger than children number.
+            family_stats_mode=sample
+                Sample children_number children.
+            family_stats_mode=dynamic
+                If the number of posible children types is less than
+                children_number, generate all children.
+                Otherwise, sample children_number children.
+        '''
         if self.get_number_of_hets() == 0:
             liability = self.homozygous_damage_mom + self.homozygous_damage_dad
             male_risk = 1.0 if liability > self.model.male_threshold else 0.0
@@ -492,64 +455,6 @@ class FamilyType:
         }
 
 
-def compute_stats_models(models: List[Model], family_mode="dynamic",
-                         genotype_type_number=10_000, family_number=100_000,
-                         family_stats_mode="dynamic",
-                         children_number=100_000,
-                         n_processes=None):
-    R = []
-    for model in models:
-        _, global_stats = model.compute_stats(
-            family_mode, genotype_type_number, family_number,
-            family_stats_mode, children_number, n_processes)
-        R.append(global_stats)
-    return R
-
-
-def add_acertainment_stats(all_stats, normlization_sum=100_000):
-    ma_ma_ws = np.array([stats['unascertained_weight'] *
-                         stats['male_risk']**2 for stats in all_stats])
-    ma_ma_ws /= ma_ma_ws.sum()
-    ma_ma_ws *= normlization_sum
-    for stats, ma_ma_w in zip(all_stats, ma_ma_ws):
-        stats['ma_ma_weight'] = ma_ma_w
-
-    mu_ma_ws = np.array([stats['unascertained_weight'] *
-                         2*stats['male_risk']*(1-stats['male_risk'])
-                         for stats in all_stats])
-    mu_ma_ws /= mu_ma_ws.sum()
-    mu_ma_ws *= normlization_sum
-    for stats, mu_ma_w in zip(all_stats, mu_ma_ws):
-        stats['mu_ma_weight'] = mu_ma_w
-
-
-def save_stats_wigler(all_stats, file_name: Optional[pathlib.Path] = None):
-    if file_name:
-        F = open(file_name, 'w')
-    else:
-        F = sys.stdout
-    # hcs = list(all_stats[0].keys())
-    hcs = "unascertained_weight,male_risk,female_risk,ma_ma_mom_SLC_mean," + \
-        "ma_ma_dad_SLC_mean,mu_ma_mom_SLC_mean,mu_ma_dad_SLC_mean"
-    # "dad_total_load,dad_pos_load,dad_neg_load,dad_max_pos_het,dad_min_neg_het," + \
-    # "mom_total_load,mom_pos_load,mom_neg_load,mom_max_pos_het,mom_min_neg_het"
-    hcs = hcs.split(",")
-
-    hcsO = "unascertainedWeight,maleRisk,femaleRisk,mamaMomSLC," + \
-        "mamaDadSLC,mumaMomSLC,mumaDadSLC"
-    # "dadTotalLoad,dadPosLoad,dadNegLoad,dadMaxPosHet,dadMinNegHet," + \
-    # "momTotalLoad,momPosLoad,momNegLoad,momMaxPosHet,momMinNegHet"
-    hcsO = hcsO.split(",")
-
-    print("\t".join(hcsO), file=F)
-
-    for stats in all_stats:
-        cs: List[Any] = [stats[a] for a in hcs]
-        print("\t".join(map(str, cs)), file=F)
-    if file_name:
-        F.close()
-
-
 def save_stats(all_stats, file_name: Optional[pathlib.Path] = None):
     if file_name:
         F = open(file_name, 'w')
@@ -558,8 +463,8 @@ def save_stats(all_stats, file_name: Optional[pathlib.Path] = None):
     hcs = list(all_stats[0].keys())
     print("\t".join(hcs), file=F)
 
-    for stats in all_stats:
-        cs: List[Any] = [stats[a] for a in hcs]
+    for st in all_stats:
+        cs: List[Any] = [st[a] for a in hcs]
         print("\t".join(map(str, cs)), file=F)
     if file_name:
         F.close()
@@ -619,135 +524,6 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
     return global_stats
 
 
-def draw_fancy_scatter(all_stats, x_att, y_att, w_att, gs, SMI, SMJ):
-    fig = pl.gcf()
-
-    main_ax = fig.add_axes(gs.get_spec(SMI, SMJ, tp='main'))
-    x_ax = fig.add_axes(gs.get_spec(SMI, SMJ, tp='x_margin'))
-    y_ax = fig.add_axes(gs.get_spec(SMI, SMJ, tp='y_margin'))
-
-    X = np.array([stats[x_att] for stats in all_stats])
-    Y = np.array([stats[y_att] for stats in all_stats])
-    W = np.array([stats[w_att] for stats in all_stats])
-    MX = max(X.max(), Y.max())
-    MN = min(X.min(), Y.min())
-    MX += (MX-MN)/10000
-    BN = 30
-    D = (MX-MN)/BN
-    cnt_2d = np.zeros((BN, BN))
-    X_I = (X-MN)//D
-    Y_I = (Y-MN)//D
-    for x_i, y_i, w in zip(X_I, Y_I, W):
-        cnt_2d[int(x_i), int(y_i)] += w
-
-    MMX = cnt_2d.max()
-    for x_i, y_i in zip(*np.nonzero(cnt_2d)):
-        w = cnt_2d[x_i, y_i]
-        # print(x_i, y_i, (MN+x_i*D, MN+y_i*D))
-
-        rp = max(0, 0.2 + 0.8*np.log10(w)/np.ceil(np.log10(MMX)))
-        rp = min(rp, 1.0)
-        c = [1, 1-rp, 1-rp]
-        main_ax.add_patch(Rectangle((MN+x_i*D, MN+y_i*D), D, D, fc=c))
-    # pl.scatter(SX, SY, s=SS)
-    main_ax.set_xlim([MN, MX])
-    main_ax.set_ylim([MN, MX])
-    main_ax.set_xlabel(x_att)
-    main_ax.set_ylabel(y_att)
-
-    bns = np.linspace(MN, MX, BN+1)
-
-    x_ax.hist(X, bns, weights=W)
-    x_ax.set_xticks([])
-    x_ax.set_xlim([MN, MX])
-    x_ax.set_yticks([1, 10, 100, 1000, 10000])
-    x_ax.set_yscale('log')
-    X_MN = (X * W).sum() / W.sum()
-    x_ax.plot([X_MN, X_MN], x_ax.get_ylim())
-    x_ax.text(x_ax.get_xlim()[1], x_ax.get_ylim()
-              [1], f"{X_MN:.3f}", ha="right", va="top")
-
-    y_ax.hist(Y, bns, weights=W, orientation='horizontal')
-    y_ax.set_ylim([MN, MX])
-    y_ax.set_yticks([])
-    y_ax.set_xticks([1, 10, 100, 1000, 10000])
-    y_ax.set_xscale('log')
-    Y_MN = (Y * W).sum() / W.sum()
-    y_ax.plot(y_ax.get_xlim(), [Y_MN, Y_MN])
-    y_ax.text(y_ax.get_xlim()[1], y_ax.get_ylim()
-              [1], f"{Y_MN:.2f}", ha="right", va="top")
-
-
-class MyGS:
-    def __init__(self, NX: int, NY: int,
-                 TM: float = 0.1, BM: float = 0.1,
-                 LM: float = 0.1, RM: float = 0.1):
-        self.NX = NX
-        self.NY = NY
-        self.TM = TM
-        self.BM = BM
-        self.LM = LM
-        self.RM = RM
-
-    def get_spec(self, X: int, Y: int, tp: str,
-                 A: float = 0.3, B: float = 0.3):
-        assert X < self.NX
-        assert Y < self.NY
-        PW = (1 - self.LM - self.RM) / self.NX
-        PH = (1 - self.TM - self.BM) / self.NY
-        PL = self.LM + X * PW
-        PB = self.BM + (self.NY-Y-1) * PH
-
-        # print(f"DDD: PW: {PW}, PH: {PH}, PL: {PL}, PB: {PB}")
-        if tp == 'main':
-            return (PL + PW*A, PB + PH*A, PW * (1-A-B), PH * (1-A-B))
-        if tp == 'x_margin':
-            return (PL + PW*A, PB + PH*(1-B), PW * (1-A-B), PH * B)
-        if tp == 'y_margin':
-            return (PL + PW*(1-B), PB + PH*A, PW * B, PH * (1-A-B))
-        else:
-            raise Exception("Unknown type " + tp)
-
-
-def draw_population_liability(model: Model, ax):
-    pop_liability = model.generate_population_liability(10000)
-    pop_liability_values, pop_liability_counts = np.unique(
-        pop_liability, return_counts=True)
-    ax.plot(pop_liability_values, pop_liability_counts/len(pop_liability),
-            'k.-', label='population liability')
-    yl = pl.ylim()
-    ax.plot([model.male_threshold]*2, yl, 'b', label='male threshold')
-    ax.plot([model.female_threshold]*2, yl, 'r', label='female threshold')
-    ax.legend()
-
-
-def draw_dashboard(model: Model, all_stats,
-                   figure_file_name: Optional[pathlib.Path] = None,
-                   show: bool = False):
-    fig = pl.figure()
-    gs = MyGS(2, 3)
-    draw_fancy_scatter(all_stats, "male_risk",
-                       "female_risk", "unascertained_weight", gs, 0, 0)
-
-    liability_ax = pl.gcf().add_axes(gs.get_spec(1, 0, tp='main', A=0.2, B=0))
-    draw_population_liability(model, liability_ax)
-
-    draw_fancy_scatter(all_stats, "male_risk",
-                       "female_risk", "ma_ma_weight", gs, 0, 1)
-    draw_fancy_scatter(all_stats, "ma_ma_dad_SLC_mean",
-                       "ma_ma_mom_SLC_mean", "ma_ma_weight", gs, 1, 1)
-    draw_fancy_scatter(all_stats, "male_risk",
-                       "female_risk", "mu_ma_weight", gs, 0, 2)
-    draw_fancy_scatter(all_stats, "mu_ma_dad_SLC_mean",
-                       "mu_ma_mom_SLC_mean", "mu_ma_weight", gs, 1, 2)
-    fig.suptitle(f'Model {model.model_name}')
-    if figure_file_name:
-        fig.set_size_inches(6, 10)
-        fig.savefig(figure_file_name)
-    if show:
-        pl.show(block=False)
-
-
 def save_global_stats(global_stats,
                       file_name: Optional[pathlib.Path] = None):
     if file_name:
@@ -760,48 +536,6 @@ def save_global_stats(global_stats,
         print(section, file=F)
         for param in global_stats[section].keys():
             print(f"  {param}:\t{global_stats[section][param]}", file=F)
-
-    if file_name:
-        F.close()
-
-
-def save_global_stats_buff(global_stats_buff,
-                           file_name: Optional[pathlib.Path] = None):
-    if file_name:
-        F = open(file_name, "w")
-    else:
-        F = sys.stdout
-
-    for section in global_stats_buff[0].keys():
-        print(file=F)
-        print(section, file=F)
-        for param in global_stats_buff[0][section].keys():
-            cs = [f"  {param}:"] + \
-                [f'{gs[section][param]}' for gs in global_stats_buff]
-            # [f'{gs[section][param]:.3f}' for gs in global_stats_buff]
-            print("\t".join(cs), file=F)
-
-    if file_name:
-        F.close()
-
-
-def save_global_stats_buff_summary(global_stats_buff,
-                                   file_name: Optional[pathlib.Path] = None):
-    if file_name:
-        F = open(file_name, "w")
-    else:
-        F = sys.stdout
-
-    for section in global_stats_buff[0].keys():
-        print(file=F)
-        print(section, file=F)
-        for param in global_stats_buff[0][section].keys():
-            vs = np.array([gs[section][param] for gs in global_stats_buff])
-            if isinstance(vs[0], str):
-                v, = set(vs)
-                print(f"  {param}: {v}", file=F)
-            else:
-                print(f"  {param}:\t{vs.mean():.3f}\t{vs.std():.5f}", file=F)
 
     if file_name:
         F.close()
@@ -874,10 +608,6 @@ def cli(cli_args=None):
                         help="The models file. It is should be a yaml file.")
     parser.add_argument("-m", "--model", nargs="*",
                         help="the model names to work on")
-
-    parser.add_argument("-r", "--runs", type=int, default=1,
-                        help="number of runs per model")
-
     parser.add_argument("-fm", "--family_mode", default="dynamic", type=str,
                         help='''
             Allowed values are: 'all', 'sample', and 'dynamic' (the default).
@@ -908,9 +638,33 @@ def cli(cli_args=None):
             'dynamic' - if the number of children is less than children_number,
             generate all childrent.
             Otherwise, sample children_number children''')
-    parser.add_argument("-cn", "--children_number", type=int, default=1_000_000,
+    parser.add_argument("-cn", "--children_number", type=int,
+                        default=1_000_000,
                         help="The number of children. See <children_mode> for "
                         "further description")
+    parser.add_argument("-w", "--warn", type=bool, default=False,
+                        help="This argumet works when precise predictions "
+                        "are requested at family set or family level "
+                        "(see --family_mode and --children_mode arguments)."
+                        "In these cases, the --warn controlls the behavious "
+                        "when the number of famililes or children exceed the "
+                        "limits set by the --family_number, --children_number, "
+                        "--genotype_number aguments. If --warn is True, a "
+                        "a warning will be printed; if --warn is False, an "
+                        "error message will be printed and the tool will "
+                        "terminate.")
+    parser.add_argument("-j", "--n_processes", type=int, default=None,
+                        help="The number of processes to be used for "
+                        "parallelizing the computations. By default, all "
+                        "available cores are used.")
+    parser.add_argument("-r", "--runs", type=int, default=1,
+                        help="number of runs per model")
+    parser.add_argument("--all_families", type=bool, default=False,
+                        help="When --all_families is True, all families, "
+                        "including the ones with affected parents will be "
+                        "included in the in family stats files. Otherwise, "
+                        "only families with unaffected parents will be "
+                        "included.")
 
     args = parser.parse_args(cli_args)
 
@@ -934,16 +688,19 @@ def cli(cli_args=None):
 
             res_dir = out_dir / f"{model.model_name}.run{run}"
             res_dir.mkdir(parents=True, exist_ok=True)
-            family_stats, global_stats = model.compute_stats(
-                family_mode=args.family_mode, family_number=args.family_number,
-                genotype_type_number=args.genotype_number,
-                family_stats_mode=args.children_mode,
-                children_number=args.children_number)
+
+            family_type_set, female_risk, male_risk = model.build_family_types(
+                args.family_mode, args.genotype_number, args.family_number,
+                args.all_families, args.warn)
+
+            family_stats = family_type_set.compute_family_stats(
+                args.children_number, args.warn, args.n_processes)
+
+            global_stats = compute_global_stats(family_stats, family_type_set,
+                                                female_risk, male_risk)
 
             save_stats(family_stats, res_dir /
                        f"family_types_{model.model_name}.txt")
-            save_stats_wigler(family_stats, res_dir /
-                              f"family_types_wigler_{model.model_name}.txt")
             save_global_stats(global_stats)
             save_global_stats(global_stats,
                               res_dir / f"global_stats_{model.model_name}")
