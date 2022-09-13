@@ -30,7 +30,8 @@ class Model:
         self.male_threshold = male_threshold
         self.female_threshold = female_threshold
         self.locus_classes = locus_classes
-        self.family_types: List[FamilyType] = []
+        self.ws = np.array([lc.w for lc in self.locus_classes])
+        self.W = np.array([(2*lc.w, lc.w) for lc in self.locus_classes])
 
     def get_number_of_loci(self):
         return sum([lc.n for lc in self.locus_classes])
@@ -114,8 +115,16 @@ class Model:
                 number_of_individuals)[:, :2])
         return np.array(by_class).transpose([1, 0, 2])
 
+    def compute_liabilities(self, GS):
+        return (GS*self.W).sum(axis=(1, 2))
+
+    def compute_liability(self, G):
+        return (G*self.W).sum()
+
     def generate_all_family_types(self, genotype_type_number=10_000,
-                                  family_number=100_000, warn=False) -> bool:
+                                  family_number=100_000, all_families=False,
+                                  warn=False) \
+            -> Tuple[FamilyTypeSet, float, float]:
 
         n_genotypes = self.get_number_of_individual_genotypes_types()
         if n_genotypes > genotype_type_number:
@@ -127,51 +136,49 @@ class Model:
 
         G, P = self.generate_all_individual_genotypes()
 
-        W = np.array([(2*lc.w, lc.w) for lc in self.locus_classes])
-        liability = (G*W).sum(axis=(1, 2))
+        liability = self.compute_liabilities(G)
+
         dad_idx = liability <= self.male_threshold
         mom_idx = liability <= self.female_threshold
 
-        dad_ps = P[dad_idx] / P[dad_idx].sum()
-        mom_ps = P[mom_idx] / P[mom_idx].sum()
+        dad_initial_risk = 1.0 - P[dad_idx].sum()
+        mom_initial_risk = 1.0 - P[mom_idx].sum()
 
-        self.dad_initial_risk = 1.0 - P[dad_idx].sum()
-        self.mom_initial_risk = 1.0 - P[mom_idx].sum()
+        if all_families:
+            description = 'all families'
+            momGs, dadGs = G, G
+            momPs, dadPs = P, P
+        else:
+            description = 'all families with unaffected parents'
+            momGs = G[mom_idx]
+            momPs = P[mom_idx]
+            dadGs = G[dad_idx]
+            dadPs = P[dad_idx]
+            momPs /= momPs.sum()
+            dadPs /= dadPs.sum()
 
-        n_families = dad_idx.sum() * mom_idx.sum()
-
-        print(f"  There are {dad_idx.sum()} unaffected dad genotypes.")
-        print(f"  There are {mom_idx.sum()} unaffected mom genotypes.")
-        print(f"  There are {n_families} unaffected families.")
-
+        n_families = len(momGs) * len(dadGs)
+        print(f"  Generating {description} ({n_families}).")
         if n_families > family_number:
             if warn:
                 print(f"WARNING: too may family types {n_families}",
                       file=sys.stderr)
             else:
                 raise Exception(f"Too many family types {n_families}")
-        print(f"Generating all {n_families} family types...")
 
-        family_types: Dict[str, FamilyType] = {}
-        for dad_p, dad_g in zip(dad_ps, G[dad_idx]):
-            for mom_p, mom_g in zip(mom_ps, G[mom_idx]):
+        family_type_set = FamilyTypeSet(description)
+        for dad_p, dad_g in zip(dadPs, dadGs):
+            for mom_p, mom_g in zip(momPs, momGs):
                 ft = FamilyType(self, mom_g, dad_g)
-                ft.unascertained_weight = dad_p * mom_p
-                assert ft.get_type_key() not in family_types
-                family_types[ft.get_type_key()] = ft
+                family_type_set.add_family_type(ft, dad_p * mom_p)
 
-        self.family_types = sorted(
-            family_types.values(),
-            key=lambda ft: ft.unascertained_weight,
-            reverse=True)
+        return family_type_set, mom_initial_risk, dad_initial_risk
 
-        return True
-
-    def compute_stats(self, family_mode="dynamic",
-                      genotype_type_number=10_000, family_number=100_000,
-                      family_stats_mode="dynamic",
-                      children_number=100_000,
-                      n_processes=None):
+    def build_family_types(self, family_mode="dynamic",
+                           genotype_type_number=10_000,
+                           family_number=100_000,
+                           all_families=False,
+                           warn=True) -> Tuple[FamilyTypeSet, float, float]:
         '''
             family_mode=all
                 Generate all family types. Warn if the number of posible
@@ -184,18 +191,30 @@ class Model:
                 all families.
                 Otherwise, sample family_number families
             family_number=1_000_000
-
-
-            family_stats_mode=all
-                Generate all children. Warn if the number of children is
-                larger than children number.
-            family_stats_mode=sample
-                Sample children_number children.
-            family_stats_mode=dynamic
-                If the number of posible children types is less than
-                children_number, generate all children.
-                Otherwise, sample children_number children.
         '''
+        if family_mode == "all":
+            return self.generate_all_family_types(
+                genotype_type_number, family_number,
+                all_families=all_families, warn=warn)
+        elif family_mode == "sample":
+            self.sample_family_types(family_number)
+        elif family_mode == "dynamic":
+            try:
+                return self.generate_all_family_types(
+                    genotype_type_number, family_number,
+                    all_families=all_families, warn=False)
+            except Exception:
+                self.sample_family_types(family_number)
+        else:
+            raise Exception(f"Unkown family_mode {family_mode}. The known "
+                            f"family_modes are all, sample, and dynamic.")
+        raise Exception('breh')
+
+    def compute_stats(self, family_mode="dynamic",
+                      genotype_type_number=10_000, family_number=100_000,
+                      family_stats_mode="dynamic",
+                      children_number=100_000,
+                      n_processes=None):
 
         # generate family types
         if family_mode == "all":
@@ -228,10 +247,89 @@ class Model:
                         FamilyType.measure_stats,
                         family_stats_mode=family_stats_mode,
                         children_number=children_number),
-                    self.family_types)
+                    range(self.get_number_of_individual_genotypes_types()))
         add_acertainment_stats(stats, family_number)
         global_stats = compute_global_stats(stats, self)
         return stats, global_stats
+
+
+class FamilyTypeSet:
+    def __init__(self, description):
+        self.description = description
+        self.family_types: List[FamilyType] = []
+        self.family_type_set_probabilities = []
+        self.ft_key_to_index: Dict[str, int] = {}
+
+    def add_family_type(self, family_type: FamilyType,
+                        family_type_set_probability: float):
+        ftk = family_type.get_type_key()
+        try:
+            idx = self.ft_key_to_index[ftk]
+            self.family_type_set_probabilities[idx] += \
+                family_type_set_probability
+        except KeyError:
+            idx = len(self.family_types)
+            self.ft_key_to_index[ftk] = idx
+            self.family_types.append(family_type)
+            self.family_type_set_probabilities.append(
+                family_type_set_probability)
+
+    def get_family_type_number(self):
+        return len(self.family_types)
+
+    def compute_all_family_specific_stats(self, family_stats_mode="dynamic",
+                                          children_number=100_000, warn=True,
+                                          n_processes=None):
+        '''
+            family_stats_mode=all
+                Generate all children. Warn if the number of children is
+                larger than children number.
+            family_stats_mode=sample
+                Sample children_number children.
+            family_stats_mode=dynamic
+                If the number of posible children types is less than
+                children_number, generate all children.
+                Otherwise, sample children_number children.
+        '''
+        if n_processes == 1:
+            stats = []
+            for fti, ft in enumerate(self.family_types):
+                if (fti % 100) == 0:
+                    print("Measuring stats for family type "
+                          f"{fti}/{self.get_family_type_number()}...")
+                stats.append(ft.measure_stats(
+                    family_stats_mode=family_stats_mode,
+                    children_number=children_number, warn=warn))
+        else:
+            with Pool(n_processes) as p:
+                stats = p.map(
+                    partial(
+                        FamilyType.measure_stats,
+                        family_stats_mode=family_stats_mode,
+                        children_number=children_number),
+                    self.family_types)
+        return stats
+
+    def add_family_set_specific_stats(self, all_stats):
+
+        unaffected_parents = np.array(
+            [ft.are_parents_unaffected()
+             for ft in self.family_types], dtype=bool)
+        pU = np.array(self.family_type_set_probabilities)
+        pU[np.logical_not(unaffected_parents)] = 0.0
+        pU /= pU.sum()
+
+        male_risk = np.array([stats['male_risk'] for stats in all_stats])
+        pC = pU * male_risk**2
+        pC /= pC.sum()
+
+        pD = pU * 2 * male_risk * (1-male_risk)
+        pD /= pD.sum()
+
+        for fs_stats, U, C, D in zip(all_stats, pU, pC, pD):
+            fs_stats['pU'] = U
+            fs_stats['pC'] = C
+            fs_stats['pD'] = D
 
 
 class FamilyType:
@@ -242,19 +340,17 @@ class FamilyType:
         self.mom_genotypes = mom_genotypes
         self.dad_genotypes = dad_genotypes
 
-        ws = np.array([lc.w for lc in model.locus_classes])
-        self.homozygous_damage_mom = ws.dot(self.mom_genotypes[:, 0])
-        self.homozygous_damage_dad = ws.dot(self.dad_genotypes[:, 0])
+        self.homozygous_damage_mom = model.ws.dot(self.mom_genotypes[:, 0])
+        self.homozygous_damage_dad = model.ws.dot(self.dad_genotypes[:, 0])
 
-        self.unascertained_weight = 1
-
-        het_types_list = \
-            [(1, lc.w, het_n)
-             for lc, het_n in zip(self.model.locus_classes,
-                                  self.dad_genotypes[:, 1]) if het_n > 0] + \
+        het_types_list = [(1, lc.w, het_n)
+                          for lc, het_n in zip(self.model.locus_classes,
+                                               self.dad_genotypes[:, 1])
+                          if het_n > 0] + \
             [(0, lc.w, het_n)
              for lc, het_n in zip(self.model.locus_classes,
-                                  self.mom_genotypes[:, 1]) if het_n > 0]
+                                  self.mom_genotypes[:, 1])
+             if het_n > 0]
         if het_types_list:
             het_types = np.array(het_types_list)
         else:
@@ -264,6 +360,18 @@ class FamilyType:
         self.het_dad = het_types[:, 0] == 1
         self.het_ws = het_types[:, 1]
         self.het_ns = np.array(het_types[:, 2], dtype=int)
+
+        self.mom_liability = model.compute_liability(self.mom_genotypes)
+        self.dad_liability = model.compute_liability(self.dad_genotypes)
+
+    def is_dad_affected(self):
+        return self.dad_liability > self.model.male_threshold
+
+    def is_mom_affected(self):
+        return self.dad_liability > self.model.male_threshold
+
+    def are_parents_unaffected(self):
+        return (not self.is_dad_affected()) and (not self.is_mom_affected())
 
     def get_type_key(self) -> str:
         def g2s(gens):
@@ -304,7 +412,7 @@ class FamilyType:
         return GS, PS
 
     def measure_stats(self, family_stats_mode="dynamic",
-                      children_number: int = 100_000):
+                      children_number: int = 100_000, warn=True):
 
         if self.get_number_of_hets() == 0:
             liability = self.homozygous_damage_mom + self.homozygous_damage_dad
@@ -313,7 +421,6 @@ class FamilyType:
 
             return {
                 'family_type_key': self.get_type_key(),
-                'unascertained_weight': self.unascertained_weight,
                 'prediction_method': 'precise',
                 'male_risk': male_risk,
                 'female_risk': female_risk,
@@ -325,9 +432,14 @@ class FamilyType:
 
         if family_stats_mode == "all":
             if self.get_number_of_child_types() > children_number:
-                print(f"WARNING: Family {self.get_type_key()} has "
-                      f"{self.get_number_of_child_types()}, more than "
-                      f"{children_number}", file=sys.stderr)
+                err_str = f"Family {self.get_type_key()} has " + \
+                    f"{self.get_number_of_child_types()}, more than " + \
+                    f"{children_number}"
+                if warn:
+                    print(f"WARNING: {err_str}, more than "
+                          f"{children_number}", file=sys.stderr)
+                else:
+                    raise Exception(err_str)
             prediction_method = 'precise'
         elif family_stats_mode == "sample":
             prediction_method = 'sample'
@@ -369,7 +481,6 @@ class FamilyType:
 
         return {
             'family_type_key': self.get_type_key(),
-            'unascertained_weight': self.unascertained_weight,
             'prediction_method': prediction_method,
             'male_risk': male_risk,
             'female_risk': female_risk,
@@ -459,12 +570,10 @@ def compute_global_stats(all_stats, model: Model):
     global_stats['Model']['name'] = model.model_name
     global_stats['Model']['male threshold'] = model.male_threshold
     global_stats['Model']['female threshold'] = model.female_threshold
-    global_stats['Model']['population variants number'] = \
-        model.get_number_of_loci()
+    global_stats['Model']['population variants number'] = model.get_number_of_loci()
 
     for lci, lc in enumerate(model.locus_classes):
-        global_stats['Model'][f'population variant class {lci}'] = \
-            f"w={lc.w}, f={lc.f}, n={lc.n}"
+        global_stats['Model'][f'population variant class {lci}'] = f"w={lc.w}, f={lc.f}, n={lc.n}"
 
     NF = float(sum([ft.unascertained_weight for ft in model.family_types]))
     global_stats['Model']['number of families'] = NF
