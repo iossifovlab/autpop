@@ -140,10 +140,10 @@ class Model:
 
     def sample_unaffected_parents_families(self, family_number):
         print(f"    Sampling {family_number} with unaffected parents...")
-        print(f"      Mother genotypes:")
+        print("      Mother genotypes:")
         momGs, female_risk = self.sample_unaffected_individual_genotypes(
             family_number, self.female_threshold)
-        print(f"      Father genotypes:")
+        print("      Father genotypes:")
         dadGs, male_risk = self.sample_unaffected_individual_genotypes(
             family_number, self.male_threshold)
 
@@ -537,12 +537,12 @@ class FamilyType:
 
         def compute_fs(idx):
             if all(np.logical_not(idx)):
-                return np.zeros(GS.shape[1])
+                return np.full(GS.shape[1], np.nan)
             GSS = GS[idx, :]
             PSS = PS[idx]
 
-            fs = (GSS / self.het_ns *
-                  PSS[np.newaxis].T).sum(axis=0) / PSS.sum()
+            fs = ((GSS / self.het_ns) * PSS[:, np.newaxis]).sum(axis=0) / \
+                PSS.sum()
             return fs
 
         ma_fs = compute_fs(liability > self.model.male_threshold)
@@ -551,10 +551,21 @@ class FamilyType:
         mC_netSCLs = (2*(ma_fs**2 + (1-ma_fs)**2) - 1) * self.het_ns
         mD_netSCLs = (2*(ma_fs*mu_fs + (1-ma_fs)*(1-mu_fs)) - 1) * self.het_ns
 
-        family_stats['mC_mom_netSCLs'] = mC_netSCLs[self.het_mom].sum()
-        family_stats['mC_dad_netSCLs'] = mC_netSCLs[self.het_dad].sum()
-        family_stats['mD_mom_netSCLs'] = mD_netSCLs[self.het_mom].sum()
-        family_stats['mD_dad_netSCLs'] = mD_netSCLs[self.het_dad].sum()
+        male_auts_types_number = (liability > self.model.male_threshold).sum()
+        C_possible = male_auts_types_number > 0
+        D_possible = male_auts_types_number > 0 and \
+            male_auts_types_number < liability.shape[0]
+        nan_value = ''
+
+        family_stats['mC_mom_netSCLs'] = \
+            mC_netSCLs[self.het_mom].sum() if C_possible else nan_value
+        family_stats['mC_dad_netSCLs'] = \
+            mC_netSCLs[self.het_dad].sum() if C_possible else nan_value
+
+        family_stats['mD_mom_netSCLs'] = \
+            mD_netSCLs[self.het_mom].sum() if D_possible else nan_value
+        family_stats['mD_dad_netSCLs'] = \
+            mD_netSCLs[self.het_dad].sum() if D_possible else nan_value
 
         return family_stats
 
@@ -593,8 +604,9 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
              not st['parents_affected']])
     global_stats['prediction'] = {
 
-        'precise': family_type_set.method == 'precise' and
-        n_unaffected_parents_families_with_sample_based_predictions == 0,
+        'precise':
+        int(family_type_set.method == 'precise' and
+            n_unaffected_parents_families_with_sample_based_predictions == 0),
         'number of possible genotypes':
         model.get_number_of_individual_genotypes_types(),
         'family set description': family_type_set.description,
@@ -625,10 +637,10 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
             ("discordant families", 'D')]:
         w_att = f'p{ft_pref}'
 
-        male_risk = weighted_average('male_risk', w_att)
-        female_risk = weighted_average('female_risk', w_att)
-        global_stats[ft_str]['male risk'] = male_risk
-        global_stats[ft_str]['female risk'] = female_risk
+        global_stats[ft_str]['male risk'] = \
+            weighted_average('male_risk', w_att)
+        global_stats[ft_str]['female risk'] = \
+            weighted_average('female_risk', w_att)
         if ft_str != "unaffected parents families":
             global_stats[ft_str]['paternal net SCLs'] = weighted_average(
                 f'm{ft_pref}_dad_netSCLs', w_att)
@@ -659,7 +671,7 @@ def save_global_stats_table(GSB, file_name: Optional[pathlib.Path] = None,
 
     hls = [
         ",Model Definition,,,,,Initial,,All Families,,Multiplex,,,,Simplex",
-        ",threshold,,loci,,,risk,,risk,,risk,,SCL,,risk,,anti-SCL",
+        ",threshold,,loci,,,risk,,risk,,risk,,net SCLs,,risk,,net SCLs",
         "Model Name,male,female,weight,frequency,number,"
         "male,female,male,female,male,"
         "female,paternal,maternal,male,female,paternal,maternal"
@@ -668,36 +680,33 @@ def save_global_stats_table(GSB, file_name: Optional[pathlib.Path] = None,
         print("\t".join(hl.split(",")), file=F)
 
     for GS in GSB:
-        for pvi in range(int(GS['Model']['population variants number'])):
-            pvK = f'population variant class {pvi}'
-            if pvK not in GS['Model']:
-                break
+        for pvi, lcd in enumerate(GS['threshold_model']['locus_classes']):
             cs = []
             if pvi == 0:
                 cs += [
-                    GS['Model']['name'],
-                    GS['Model']['male threshold'],
-                    GS['Model']['female threshold'],
+                    GS['threshold_model']['name'],
+                    GS['threshold_model']['male_threshold'],
+                    GS['threshold_model']['female_threshold'],
                 ]
             else:
                 cs += [""] * 3
-            cs += [bb.strip(" ").split("=")[1]
-                   for bb in GS['Model'][pvK].split(",")]
+            cs += [lcd['w'], lcd['f'], lcd['n']]
             if pvi == 0:
                 for section in \
-                    ['Initial', 'Unascertained',
-                     'Families with two affected boys',
-                     'Families with one affected one unaffected boy']:
+                    ['initial risks', 'unaffected parents families',
+                     'concordant families',
+                     'discordant families']:
                     for gender in ['male', 'female']:
                         param = f'{gender} risk'
                         if prec:
                             cs.append(f'{GS[section][param]: .{prec}f}')
                         else:
                             cs.append(f'{GS[section][param]}')
-                    if not section.startswith('Families'):
+                    if section not in ['concodrand families',
+                                       'discordant families']:
                         continue
-                    for parent in ['father', 'mother']:
-                        param = f'sharing of the {parent}'
+                    for parent in ['paternal', 'maternal']:
+                        param = f'{parent} net SCLs'
                         if prec:
                             cs.append(f'{GS[section][param]: .{prec}f}')
                         else:
@@ -775,6 +784,9 @@ def cli(cli_args=None):
                         "included in the in family stats files. Otherwise, "
                         "only families with unaffected parents will be "
                         "included.")
+    parser.add_argument("-op", "--output_precision", type=int, default=3,
+                        help="The precision of all float values in the "
+                        "models_results.txt output table.")
 
     args = parser.parse_args(cli_args)
 
@@ -831,4 +843,5 @@ def cli(cli_args=None):
             if global_stats['prediction']['precise']:
                 assert run == 0
                 break
-    # save_global_stats_table(GSB, out_dir / "models_results.txt")
+    save_global_stats_table(GSB, out_dir / "models_results.txt",
+                            prec=args.output_precision)

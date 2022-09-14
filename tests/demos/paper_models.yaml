@@ -57,7 +57,7 @@ threshold_model:
 threshold_model:
   name: "Example 5: Complex frequent risk with protection"
   male_threshold: 10.7
-  female_threshold: 11.25
+  female_threshold: 11.24
   locus_classes:
     - {w: 0.15, f: 0.9, n: 40}
     - {w: -15, f: 0.03, n: 60}
