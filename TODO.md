@@ -1,10 +1,18 @@
 
-* Revive save_global_stats_table
-    * add precision argument
+
 
 * Revive the summarize_results.
     * add the global summary table to the autpop if there a model 
     is run more than once.
+
+* (DONE) rename the pU, pC and pD columns. Into what?
+
+* (DONE) split the family_type_key into mom_genotype and dad_genotype
+
+* (DONE) make the FamilyType constructor accept genotypes as strings
+
+* (DONE) Revive save_global_stats_table
+    * add precision argument
 
 * (DONE) Add processing and timing messages to standard output
 

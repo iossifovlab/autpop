@@ -43,7 +43,7 @@ def test_add_family_set_specific_stats():
     fts.add_family_set_specific_stats(all_stats)
 
     save_stats(all_stats)
-    assert 'pU' in all_stats[0]
+    assert 'unaffected_parents_family_probability' in all_stats[0]
 
 
 def test_global_stats_with_and_without_all_families():

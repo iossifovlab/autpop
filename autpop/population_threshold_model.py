@@ -357,7 +357,7 @@ class FamilyTypeSet:
     def add_family_set_specific_stats(self, all_stats):
 
         unaffected_parents = np.array(
-            [st['parents_affected'] == 0 for st in all_stats], dtype=bool)
+            [st['unaffected_parents'] == 1 for st in all_stats], dtype=bool)
         pU = np.array(self.family_type_set_probabilities)
         pU[np.logical_not(unaffected_parents)] = 0.0
         pU /= pU.sum()
@@ -370,9 +370,9 @@ class FamilyTypeSet:
         pD /= pD.sum()
 
         for fs_stats, U, C, D in zip(all_stats, pU, pC, pD):
-            fs_stats['pU'] = U
-            fs_stats['pC'] = C
-            fs_stats['pD'] = D
+            fs_stats['unaffected_parents_family_probability'] = U
+            fs_stats['concordant_males_family_probability'] = C
+            fs_stats['discordant_males_family_probability'] = D
 
 
 class FamilyType:
@@ -381,12 +381,26 @@ class FamilyType:
 
         self.model = model
 
-        self.mom_genotypes = mom_genotypes
-        self.dad_genotypes = dad_genotypes
+        def handle_genotype(genotype):
+            if isinstance(genotype, str):
+                return FamilyType.genotype_string_to_genotype(genotype)
+            return genotype
+
+        self.mom_genotypes = handle_genotype(mom_genotypes)
+        self.dad_genotypes = handle_genotype(dad_genotypes)
 
         self.precomputed = False
         if not delay_precompute:
             self.precompute()
+
+    @staticmethod
+    def genotype_string_to_genotype(gensS: str):
+        return np.array([[int(v) for v in gS.split(",")]
+                         for gS in gensS.split(":")])
+
+    @staticmethod
+    def genotype_to_string(genotype):
+        return ":".join([",".join(map(str, g)) for g in genotype])
 
     def precompute(self):
         if self.precomputed:
@@ -432,9 +446,8 @@ class FamilyType:
         return (not self.is_dad_affected()) and (not self.is_mom_affected())
 
     def get_type_key(self) -> str:
-        def g2s(gens):
-            return ":".join([",".join(map(str, g)) for g in gens])
-        return g2s(self.mom_genotypes) + "|" + g2s(self.dad_genotypes)
+        return FamilyType.genotype_to_string(self.mom_genotypes) + "|" + \
+            FamilyType.genotype_to_string(self.dad_genotypes)
 
     def get_number_of_hets(self):
         return self.mom_genotypes[:, 1].sum() + self.dad_genotypes[:, 1].sum()
@@ -489,13 +502,15 @@ class FamilyType:
         self.precompute()
 
         family_stats = {
-            'family_type_key': self.get_type_key(),
-            'parents_affected': int(not self.are_parents_unaffected()),
+            'mom_genotype': FamilyType.genotype_to_string(self.mom_genotypes),
+            'dad_genotype': FamilyType.genotype_to_string(self.dad_genotypes),
             'mom_liability': self.mom_liability,
-            'mom_affected': int(self.is_mom_affected()),
             'dad_liability': self.dad_liability,
+            'mom_affected': int(self.is_mom_affected()),
             'dad_affected': int(self.is_dad_affected()),
-            'family_probability': self.get_family_probability()
+            'unaffected_parents': int(self.are_parents_unaffected()),
+            'family_probability': self.get_family_probability(),
+            'number_of_child_type': self.get_number_of_child_types()
         }
 
         if family_stats_mode == "all":
@@ -557,14 +572,14 @@ class FamilyType:
             male_auts_types_number < liability.shape[0]
         nan_value = ''
 
-        family_stats['mC_mom_netSCLs'] = \
+        family_stats['maternal_netSCLs_concordant_males'] = \
             mC_netSCLs[self.het_mom].sum() if C_possible else nan_value
-        family_stats['mC_dad_netSCLs'] = \
+        family_stats['paternal_netSCLs_concordant_males'] = \
             mC_netSCLs[self.het_dad].sum() if C_possible else nan_value
 
-        family_stats['mD_mom_netSCLs'] = \
+        family_stats['maternal_netSCLs_discordant_males'] = \
             mD_netSCLs[self.het_mom].sum() if D_possible else nan_value
-        family_stats['mD_dad_netSCLs'] = \
+        family_stats['paternal_netSCLs_discordant_males'] = \
             mD_netSCLs[self.het_dad].sum() if D_possible else nan_value
 
         return family_stats
@@ -614,7 +629,7 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
         'number of family types with sampling':
         n_families_with_sample_based_predictions,
         'number of unaffected-parents family types':
-        len([1 for st in all_stats if not st['parents_affected']]),
+        len([1 for st in all_stats if st['unaffected_parents']]),
         'number of unaffected-parents family types with sampling':
         n_unaffected_parents_families_with_sample_based_predictions
     }
@@ -632,10 +647,10 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
         return float(w_ave)
 
     for ft_str, ft_pref in [
-            ("unaffected parents families", 'U'),
-            ("concordant families", 'C'),
-            ("discordant families", 'D')]:
-        w_att = f'p{ft_pref}'
+            ("unaffected parents families", 'unaffected_parents'),
+            ("concordant families", 'concordant_males'),
+            ("discordant families", 'discordant_males')]:
+        w_att = f'{ft_pref}_family_probability'
 
         global_stats[ft_str]['male risk'] = \
             weighted_average('male_risk', w_att)
@@ -643,9 +658,9 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
             weighted_average('female_risk', w_att)
         if ft_str != "unaffected parents families":
             global_stats[ft_str]['paternal net SCLs'] = weighted_average(
-                f'm{ft_pref}_dad_netSCLs', w_att)
+                f'paternal_netSCLs_{ft_pref}', w_att)
             global_stats[ft_str]['maternal net SCLs'] = weighted_average(
-                f'm{ft_pref}_mom_netSCLs', w_att)
+                f'maternal_netSCLs_{ft_pref}', w_att)
     return dict(global_stats)
 
 
@@ -702,7 +717,7 @@ def save_global_stats_table(GSB, file_name: Optional[pathlib.Path] = None,
                             cs.append(f'{GS[section][param]: .{prec}f}')
                         else:
                             cs.append(f'{GS[section][param]}')
-                    if section not in ['concodrand families',
+                    if section not in ['concordant families',
                                        'discordant families']:
                         continue
                     for parent in ['paternal', 'maternal']:
