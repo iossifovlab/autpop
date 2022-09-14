@@ -1,3 +1,13 @@
+
+* Revive save_global_stats_table
+    * add precision argument
+
+* Revive the summarize_results.
+    * add the global summary table to the autpop if there a model 
+    is run more than once.
+
+* (DONE) Add processing and timing messages to standard output
+
 * (DONE) Add the n_processes command line argument
 * (DONE) Add the all_families command line argument
 
@@ -21,4 +31,4 @@ for the precise computation!
 
 * (DONE) If predictions of the first run are precise, don't run more
 
-* Implement the family sampling mode
+* (DONE) Implement the family sampling mode
