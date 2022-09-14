@@ -11,6 +11,7 @@ from multiprocessing import Pool
 import numpy as np
 import scipy.stats as stats
 from .cartisian import cartesian_product_pp, cartesian_product_itertools
+import time
 
 
 class LocusClass(NamedTuple):
@@ -28,6 +29,7 @@ class Model:
         self.male_threshold = male_threshold
         self.female_threshold = female_threshold
         self.locus_classes = locus_classes
+
         self.ws = np.array([lc.w for lc in self.locus_classes])
         self.W = np.array([(2*lc.w, lc.w) for lc in self.locus_classes])
 
@@ -36,7 +38,7 @@ class Model:
 
     def get_number_of_individual_genotypes_types(self):
         ns = np.array([lc.n for lc in self.locus_classes])
-        return ((ns+1)*(ns+2)//2).prod()
+        return int(((ns+1)*(ns+2)//2).prod())
 
     def describe(self, F=sys.stdout):
         print(f"MODEL {self.model_name}", file=F)
@@ -59,7 +61,7 @@ class Model:
         print(f"\tMaximum number of hets: {n_hets_max}", file=F)
         '''
 
-    @staticmethod
+    @ staticmethod
     def dict_to_model(data) -> Model:
         locus_classes = []
         for locus_def in data['locus_classes']:
@@ -82,7 +84,7 @@ class Model:
                               for lc in self.locus_classes]
         }
 
-    @staticmethod
+    @ staticmethod
     def load_models_file(file_name: str) -> List[Model]:
         with open(file_name) as F:
             model_defs = yaml.safe_load_all(F)
@@ -103,7 +105,7 @@ class Model:
                                                 2*lc.f*(1-lc.f),
                                                 (1-lc.f)*(1-lc.f)])
             p_arrays.append(P)
-            g_arrays.append(A[:, :2])
+            g_arrays.append(A[:, : 2])
 
         G = cartesian_product_itertools(g_arrays)
         P = cartesian_product_itertools(p_arrays).prod(axis=1)
@@ -116,7 +118,7 @@ class Model:
             by_class.append(stats.multinomial.rvs(
                 lc.n,
                 [lc.f*lc.f, 2*lc.f*(1-lc.f), (1-lc.f)*(1-lc.f)],
-                number_of_individuals)[:, :2])
+                number_of_individuals)[:, : 2])
         return np.array(by_class).transpose([1, 0, 2])
 
     def sample_unaffected_individual_genotypes(self, number_of_individuals,
@@ -137,8 +139,11 @@ class Model:
             float(1.0 - (n_done / n_simulated))
 
     def sample_unaffected_parents_families(self, family_number):
+        print(f"    Sampling {family_number} with unaffected parents...")
+        print(f"      Mother genotypes:")
         momGs, female_risk = self.sample_unaffected_individual_genotypes(
             family_number, self.female_threshold)
+        print(f"      Father genotypes:")
         dadGs, male_risk = self.sample_unaffected_individual_genotypes(
             family_number, self.male_threshold)
 
@@ -149,16 +154,18 @@ class Model:
                                         'sample')
         for momG, dadG in zip(momGs, dadGs):
             family_type_set.add_family_type(
-                FamilyType(self, momG, dadG), ft_probability)
+                FamilyType(self, momG, dadG, delay_precompute=True),
+                ft_probability)
         return family_type_set, female_risk, male_risk
 
     def sample_all_families(self, family_number):
+        print(f"    Sampling {family_number} families...")
         momGs = self.sample_individual_genotypes(family_number)
         dadGs = self.sample_individual_genotypes(family_number)
 
         def risk(GS, threshold):
             L = self.compute_liabilities(GS)
-            return (L > threshold).sum()/len(L)
+            return float((L > threshold).sum()/len(L))
 
         ft_probability = (1 / family_number)**2
         family_type_set = FamilyTypeSet(self,
@@ -166,7 +173,8 @@ class Model:
                                         'sample')
         for momG, dadG in zip(momGs, dadGs):
             family_type_set.add_family_type(
-                FamilyType(self, momG, dadG), ft_probability)
+                FamilyType(self, momG, dadG, delay_precompute=True),
+                ft_probability)
         return family_type_set, \
             risk(momGs, self.female_threshold), \
             risk(dadGs, self.male_threshold)
@@ -176,6 +184,19 @@ class Model:
 
     def compute_liability(self, G):
         return (G*self.W).sum()
+
+    def compute_genotype_probability(self, G):
+        multinomial_dists = [
+            stats.multinomial(lc.n, [lc.f*lc.f,
+                                     2*lc.f*(1-lc.f),
+                                     (1-lc.f)*(1-lc.f)])
+            for lc in self.locus_classes]
+        probs = np.array([
+            mult_dist.pmf([hom, het, lc.n-hom-het])
+            for (hom, het), lc, mult_dist in
+            zip(G, self.locus_classes, multinomial_dists)])
+        prob = float(probs.prod())
+        return prob
 
     def generate_all_family_types(self, genotype_type_number=10_000,
                                   family_number=100_000, all_families=False,
@@ -214,18 +235,17 @@ class Model:
             dadPs /= dadPs.sum()
 
         n_families = len(momGs) * len(dadGs)
-        print(f"  Generating {description} ({n_families}).")
         if n_families > family_number:
             if warn:
                 print(f"WARNING: too may family types {n_families}",
                       file=sys.stderr)
             else:
                 raise Exception(f"Too many family types {n_families}")
-
+        print(f"    Generating {description} ({n_families}).")
         family_type_set = FamilyTypeSet(self, description, 'precise')
         for dad_p, dad_g in zip(dadPs, dadGs):
             for mom_p, mom_g in zip(momPs, momGs):
-                ft = FamilyType(self, mom_g, dad_g)
+                ft = FamilyType(self, mom_g, dad_g, delay_precompute=True)
                 family_type_set.add_family_type(ft, dad_p * mom_p)
 
         return family_type_set, mom_initial_risk, dad_initial_risk
@@ -337,8 +357,7 @@ class FamilyTypeSet:
     def add_family_set_specific_stats(self, all_stats):
 
         unaffected_parents = np.array(
-            [ft.are_parents_unaffected()
-             for ft in self.family_types], dtype=bool)
+            [st['parents_affected'] == 0 for st in all_stats], dtype=bool)
         pU = np.array(self.family_type_set_probabilities)
         pU[np.logical_not(unaffected_parents)] = 0.0
         pU /= pU.sum()
@@ -357,15 +376,27 @@ class FamilyTypeSet:
 
 
 class FamilyType:
-    def __init__(self, model: Model, mom_genotypes, dad_genotypes):
+    def __init__(self, model: Model, mom_genotypes, dad_genotypes,
+                 delay_precompute=False):
 
         self.model = model
 
         self.mom_genotypes = mom_genotypes
         self.dad_genotypes = dad_genotypes
 
-        self.homozygous_damage_mom = model.ws.dot(self.mom_genotypes[:, 0])
-        self.homozygous_damage_dad = model.ws.dot(self.dad_genotypes[:, 0])
+        self.precomputed = False
+        if not delay_precompute:
+            self.precompute()
+
+    def precompute(self):
+        if self.precomputed:
+            return
+        self.precomputed = True
+
+        self.homozygous_damage_mom = self.model.ws.dot(
+            self.mom_genotypes[:, 0])
+        self.homozygous_damage_dad = self.model.ws.dot(
+            self.dad_genotypes[:, 0])
 
         het_types_list = [(1, lc.w, het_n)
                           for lc, het_n in zip(self.model.locus_classes,
@@ -385,8 +416,11 @@ class FamilyType:
         self.het_ws = het_types[:, 1]
         self.het_ns = np.array(het_types[:, 2], dtype=int)
 
-        self.mom_liability = model.compute_liability(self.mom_genotypes)
-        self.dad_liability = model.compute_liability(self.dad_genotypes)
+        self.mom_liability = self.model.compute_liability(self.mom_genotypes)
+        self.dad_liability = self.model.compute_liability(self.dad_genotypes)
+
+    def get_homozygous_damage(self):
+        return self.homozygous_damage_dad + self.homozygous_damage_mom
 
     def is_dad_affected(self):
         return self.dad_liability > self.model.male_threshold
@@ -408,6 +442,10 @@ class FamilyType:
     def get_number_of_child_types(self):
         het_ns = np.array([self.mom_genotypes[:, 1], self.dad_genotypes[:, 1]])
         return (het_ns+1).prod()
+
+    def get_family_probability(self):
+        return self.model.compute_genotype_probability(self.mom_genotypes) * \
+            self.model.compute_genotype_probability(self.dad_genotypes)
 
     def generate_all_child_types(self):
         if len(self.het_ns) == 0:
@@ -448,14 +486,16 @@ class FamilyType:
                 children_number, generate all children.
                 Otherwise, sample children_number children.
         '''
+        self.precompute()
 
         family_stats = {
             'family_type_key': self.get_type_key(),
-            'parents_affected': not self.are_parents_unaffected(),
+            'parents_affected': int(not self.are_parents_unaffected()),
             'mom_liability': self.mom_liability,
-            'mom_affected': self.is_mom_affected(),
+            'mom_affected': int(self.is_mom_affected()),
             'dad_liability': self.dad_liability,
-            'dad_affected': self.is_dad_affected()
+            'dad_affected': int(self.is_dad_affected()),
+            'family_probability': self.get_family_probability()
         }
 
         if family_stats_mode == "all":
@@ -468,20 +508,20 @@ class FamilyType:
                           f"{children_number}", file=sys.stderr)
                 else:
                     raise Exception(err_str)
-            prediction_method = 'precise'
+            precise_prediction = True
         elif family_stats_mode == "sample":
-            prediction_method = 'sample'
+            precise_prediction = False
         elif family_stats_mode == "dynamic":
             if self.get_number_of_child_types() < children_number:
-                prediction_method = 'precise'
+                precise_prediction = True
             else:
-                prediction_method = 'sample'
+                precise_prediction = False
         else:
             raise Exception(f"Unknown family_stats_mode {family_stats_mode}."
                             f"The family_stats_mode should be all, sample, "
                             f"or dynamic.")
 
-        if prediction_method == 'precise':
+        if precise_prediction:
             GS, PS = self.generate_all_child_types()
         else:
             GS, PS = self.sample_child_types(children_number)
@@ -491,7 +531,7 @@ class FamilyType:
         male_risk = PS[liability > self.model.male_threshold].sum()
         female_risk = PS[liability > self.model.female_threshold].sum()
 
-        family_stats['prediction_method'] = prediction_method
+        family_stats['precise_prediction'] = int(precise_prediction)
         family_stats['male_risk'] = male_risk
         family_stats['female_risk'] = female_risk
 
@@ -545,16 +585,18 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
 
     n_families_with_sample_based_predictions = \
         len([1 for st in all_stats
-             if st['prediction_method'] == 'sample'])
+             if not st['precise_prediction']])
 
     n_unaffected_parents_families_with_sample_based_predictions = \
         len([1 for st in all_stats
-             if st['prediction_method'] == 'sample' and
+             if not st['precise_prediction'] and
              not st['parents_affected']])
     global_stats['prediction'] = {
 
         'precise': family_type_set.method == 'precise' and
         n_unaffected_parents_families_with_sample_based_predictions == 0,
+        'number of possible genotypes':
+        model.get_number_of_individual_genotypes_types(),
         'family set description': family_type_set.description,
         'number of family types': len(all_stats),
         'number of family types with sampling':
@@ -566,7 +608,7 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
     }
 
     if female_initial_risk is not None or male_initial_risk is not None:
-        global_stats['initial'] = {
+        global_stats['initial risks'] = {
             'male risk': male_initial_risk,
             'female risk': female_initial_risk
         }
@@ -578,16 +620,16 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
         return float(w_ave)
 
     for ft_str, ft_pref in [
-            ("unaffected parents", 'U'),
-            ("concordant", 'C'),
-            ("discordant", 'D')]:
+            ("unaffected parents families", 'U'),
+            ("concordant families", 'C'),
+            ("discordant families", 'D')]:
         w_att = f'p{ft_pref}'
 
         male_risk = weighted_average('male_risk', w_att)
         female_risk = weighted_average('female_risk', w_att)
         global_stats[ft_str]['male risk'] = male_risk
         global_stats[ft_str]['female risk'] = female_risk
-        if ft_str != "unaffected parents":
+        if ft_str != "unaffected parents families":
             global_stats[ft_str]['paternal net SCLs'] = weighted_average(
                 f'm{ft_pref}_dad_netSCLs', w_att)
             global_stats[ft_str]['maternal net SCLs'] = weighted_average(
@@ -754,26 +796,38 @@ def cli(cli_args=None):
         for run in range(args.runs):
             print(f"RUN {run}")
 
+            time_beg = time.time()
+
+            def step(msg):
+                time_now = time.time()
+                print(f"  STEP {msg} at {time_now-time_beg:.1f} seconds...")
+
             res_dir = out_dir / f"{model.model_name}.run{run}"
             res_dir.mkdir(parents=True, exist_ok=True)
 
+            step("Building families")
             family_type_set, female_risk, male_risk = model.build_family_types(
                 args.family_mode, args.genotype_number, args.family_number,
                 args.all_families, args.warn)
 
+            step(f"Computing {len(family_type_set.family_types)} family stats")
             family_stats = family_type_set.compute_family_stats(
                 args.children_mode, args.children_number,
                 args.warn, args.n_processes)
 
+            step("Computing global stats")
             global_stats = compute_global_stats(family_stats, family_type_set,
                                                 female_risk, male_risk)
 
+            step("Saving results")
             save_stats(family_stats, res_dir /
                        f"family_types_{model.model_name}.txt")
             save_global_stats(global_stats)
-            save_global_stats(global_stats,
-                              res_dir / f"global_stats_{model.model_name}")
+            save_global_stats(
+                global_stats,
+                res_dir / f"global_stats_{model.model_name}.yaml")
             GSB.append(global_stats)
+            step("DONE.")
             if global_stats['prediction']['precise']:
                 assert run == 0
                 break

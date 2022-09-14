@@ -10,6 +10,7 @@ def test_full_stack():
     fts.add_family_set_specific_stats(all_stats)
     global_stats = compute_global_stats(all_stats, fts, female_ir, male_ir)
     assert global_stats
+    assert global_stats['prediction']['precise']
 
     save_stats(all_stats)
     save_global_stats(global_stats)
