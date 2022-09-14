@@ -1,7 +1,5 @@
 
-
-
-* Revive the summarize_results.
+* (DONE) Revive the summarize_results.
     * add the global summary table to the autpop if there a model 
     is run more than once.
 

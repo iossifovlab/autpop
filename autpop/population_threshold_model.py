@@ -617,7 +617,7 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
         len([1 for st in all_stats
              if not st['precise_prediction'] and
              not st['parents_affected']])
-    global_stats['prediction'] = {
+    global_stats['prediction_details'] = {
 
         'precise':
         int(family_type_set.method == 'precise' and
@@ -731,6 +731,37 @@ def save_global_stats_table(GSB, file_name: Optional[pathlib.Path] = None,
         F.close()
 
 
+def compute_mean_at_appropriate_precision(vls, MXP):
+    mn = np.mean(vls)
+    for p in range(MXP, -1, -1):
+        mvs = f'%.{p}f' % mn
+        mv = float(f'%.{p}f' % mn)
+        md = max([abs(mv-v) for v in vls])
+        dst_cutoff = (10**-(p-1)) / 2
+        # print("\t", p, mvs, mv, md, dst_cutoff)
+        if md < dst_cutoff:
+            return mvs
+
+
+def average_multiple_runs(GSB, prec=4):
+    r = []
+    by_models = defaultdict(list)
+    for GS in GSB:
+        by_models[GS['threshold_model']['name']].append(GS)
+    for _, GSS in by_models.items():
+        GS = GSS[0]
+        for sec, dd in GS.items():
+            if sec in ['threshold_model', 'prediction_details']:
+                continue
+            for key, v in dd.items():
+                if isinstance(v, float):
+                    vs = [G[sec][key] for G in GSS]
+                    GS[sec][key] = compute_mean_at_appropriate_precision(
+                        vs, prec)
+        r.append(GS)
+    return r
+
+
 def cli(cli_args=None):
     """Provide CLI for threshold model."""
     if not cli_args:
@@ -818,9 +849,12 @@ def cli(cli_args=None):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     GSB = []
+    need_average = False
     for model in models:
         print(f"\n\nWorking on {model.model_name}...")
         for run in range(args.runs):
+            if run > 0:
+                need_average = True
             print(f"RUN {run}")
 
             time_beg = time.time()
@@ -855,8 +889,12 @@ def cli(cli_args=None):
                 res_dir / f"global_stats_{model.model_name}.yaml")
             GSB.append(global_stats)
             step("DONE.")
-            if global_stats['prediction']['precise']:
+            if global_stats['prediction_details']['precise']:
                 assert run == 0
                 break
     save_global_stats_table(GSB, out_dir / "models_results.txt",
                             prec=args.output_precision)
+    if need_average:
+        GSBS = average_multiple_runs(GSB, args.output_precision)
+        save_global_stats_table(GSBS, out_dir / "models_average_results.txt",
+                                prec=None)
