@@ -1,0 +1,11 @@
+threshold_model:
+  name: basic
+  male_threshold: 9
+  female_threshold: 11
+  locus_classes:
+  - w: 1
+    f: 0.4
+    n: 5
+  - w: 8
+    f: 0.01
+    n: 2

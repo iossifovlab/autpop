@@ -60,12 +60,9 @@ class Model:
         '''
 
     @staticmethod
-    def model_def_to_model(model_def) -> Model:
-        assert len(model_def) == 1
-        assert "threshold_model" in model_def
-        data = model_def["threshold_model"]
+    def dict_to_model(data) -> Model:
         locus_classes = []
-        for locus_def in data['loci']:
+        for locus_def in data['locus_classes']:
             locus_classes.append(LocusClass(
                 locus_def["w"],
                 locus_def.get("n", 1),
@@ -76,11 +73,20 @@ class Model:
                      data["female_threshold"],
                      locus_classes)
 
+    def to_dict(self):
+        return {
+            "name": self.model_name,
+            "male_threshold": self.male_threshold,
+            "female_threshold": self.female_threshold,
+            "locus_classes": [{"w": lc.w, "f": lc.f, "n": lc.n}
+                              for lc in self.locus_classes]
+        }
+
     @staticmethod
     def load_models_file(file_name: str) -> List[Model]:
         with open(file_name) as F:
             model_defs = yaml.safe_load_all(F)
-            return [Model.model_def_to_model(model_def)
+            return [Model.dict_to_model(model_def['threshold_model'])
                     for model_def in model_defs]
 
     def generate_all_individual_genotypes(self):
@@ -113,6 +119,58 @@ class Model:
                 number_of_individuals)[:, :2])
         return np.array(by_class).transpose([1, 0, 2])
 
+    def sample_unaffected_individual_genotypes(self, number_of_individuals,
+                                               threshold):
+        n_done = 0
+        gen_buff = []
+        n_simulated = 0
+        while n_done < number_of_individuals:
+            Gs = self.sample_individual_genotypes(number_of_individuals)
+            liability = self.compute_liabilities(Gs)
+            unaffected_idx = liability <= threshold
+            gen_buff.append(Gs[unaffected_idx, :])
+            n_done += unaffected_idx.sum()
+            n_simulated += number_of_individuals
+            print(f"\t{n_done}/{number_of_individuals} done.")
+        gens = np.vstack(gen_buff)
+        return gens[:number_of_individuals, :], \
+            float(1.0 - (n_done / n_simulated))
+
+    def sample_unaffected_parents_families(self, family_number):
+        momGs, female_risk = self.sample_unaffected_individual_genotypes(
+            family_number, self.female_threshold)
+        dadGs, male_risk = self.sample_unaffected_individual_genotypes(
+            family_number, self.male_threshold)
+
+        ft_probability = (1 / family_number)**2
+        family_type_set = FamilyTypeSet(self,
+                                        f"sampling {family_number} "
+                                        "unaffected-parents families",
+                                        'sample')
+        for momG, dadG in zip(momGs, dadGs):
+            family_type_set.add_family_type(
+                FamilyType(self, momG, dadG), ft_probability)
+        return family_type_set, female_risk, male_risk
+
+    def sample_all_families(self, family_number):
+        momGs = self.sample_individual_genotypes(family_number)
+        dadGs = self.sample_individual_genotypes(family_number)
+
+        def risk(GS, threshold):
+            L = self.compute_liabilities(GS)
+            return (L > threshold).sum()/len(L)
+
+        ft_probability = (1 / family_number)**2
+        family_type_set = FamilyTypeSet(self,
+                                        f"sampling {family_number} families",
+                                        'sample')
+        for momG, dadG in zip(momGs, dadGs):
+            family_type_set.add_family_type(
+                FamilyType(self, momG, dadG), ft_probability)
+        return family_type_set, \
+            risk(momGs, self.female_threshold), \
+            risk(dadGs, self.male_threshold)
+
     def compute_liabilities(self, GS):
         return (GS*self.W).sum(axis=(1, 2))
 
@@ -139,8 +197,8 @@ class Model:
         dad_idx = liability <= self.male_threshold
         mom_idx = liability <= self.female_threshold
 
-        dad_initial_risk = 1.0 - P[dad_idx].sum()
-        mom_initial_risk = 1.0 - P[mom_idx].sum()
+        dad_initial_risk = float(1.0 - P[dad_idx].sum())
+        mom_initial_risk = float(1.0 - P[mom_idx].sum())
 
         if all_families:
             description = 'all families'
@@ -195,16 +253,21 @@ class Model:
                 genotype_type_number, family_number,
                 all_families=all_families, warn=warn)
         elif family_mode == "sample":
-            raise Exception("NOT YET!!!")
-            # return self.sample_family_types(family_number)
+            if all_families:
+                return self.sample_all_families(family_number)
+            else:
+                return self.sample_unaffected_parents_families(family_number)
         elif family_mode == "dynamic":
             try:
                 return self.generate_all_family_types(
                     genotype_type_number, family_number,
                     all_families=all_families, warn=False)
             except Exception:
-                raise Exception("NOT YET!!!")
-                # return self.sample_family_types(family_number)
+                if all_families:
+                    return self.sample_all_families(family_number)
+                else:
+                    return self.sample_unaffected_parents_families(
+                        family_number)
         else:
             raise Exception(f"Unkown family_mode {family_mode}. The known "
                             f"family_modes are all, sample, and dynamic.")
@@ -478,15 +541,7 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
     model = family_type_set.model
     global_stats = defaultdict(dict)
 
-    global_stats['Model']['name'] = model.model_name
-    global_stats['Model']['male threshold'] = model.male_threshold
-    global_stats['Model']['female threshold'] = model.female_threshold
-    global_stats['Model']['population variants number'] = \
-        model.get_number_of_loci()
-
-    for lci, lc in enumerate(model.locus_classes):
-        global_stats['Model'][f'population variant class {lci}'] = \
-            f"w={lc.w}, f={lc.f}, n={lc.n}"
+    global_stats['threshold_model'] = model.to_dict()
 
     n_families_with_sample_based_predictions = \
         len([1 for st in all_stats
@@ -496,7 +551,7 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
         len([1 for st in all_stats
              if st['prediction_method'] == 'sample' and
              not st['parents_affected']])
-    global_stats['Prediction method'] = {
+    global_stats['prediction'] = {
 
         'precise': family_type_set.method == 'precise' and
         n_unaffected_parents_families_with_sample_based_predictions == 0,
@@ -511,8 +566,10 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
     }
 
     if female_initial_risk is not None or male_initial_risk is not None:
-        global_stats['Initial']['male risk'] = male_initial_risk
-        global_stats['Initial']['female risk'] = female_initial_risk
+        global_stats['initial'] = {
+            'male risk': male_initial_risk,
+            'female risk': female_initial_risk
+        }
 
     def weighted_average(att, w_att):
         w_sum = sum([st[w_att] for st in all_stats])
@@ -521,28 +578,21 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
         return float(w_ave)
 
     for ft_str, ft_pref in [
-            ("Unascertained", 'U'),
-            ("Families with two affected boys", 'C'),
-            ("Families with one affected one unaffected boy", 'D')]:
+            ("unaffected parents", 'U'),
+            ("concordant", 'C'),
+            ("discordant", 'D')]:
         w_att = f'p{ft_pref}'
 
         male_risk = weighted_average('male_risk', w_att)
         female_risk = weighted_average('female_risk', w_att)
         global_stats[ft_str]['male risk'] = male_risk
         global_stats[ft_str]['female risk'] = female_risk
-        if ft_str == "Unascertained":
-            global_stats[ft_str]['two boys, both affected, proportion'] = \
-                float(male_risk * male_risk)
-            global_stats[ft_str]['two boys, one affected, proportion'] = \
-                float(2 * male_risk * (1-male_risk))
-            global_stats[ft_str]['two boys, none affected, proportion'] = \
-                float((1-male_risk) * (1-male_risk))
-        else:
-            global_stats[ft_str]['sharing of the father'] = \
-                weighted_average(f'm{ft_pref}_dad_netSCLs', w_att)
-            global_stats[ft_str]['sharing of the mother'] = \
-                weighted_average(f'm{ft_pref}_mom_netSCLs', w_att)
-    return global_stats
+        if ft_str != "unaffected parents":
+            global_stats[ft_str]['paternal net SCLs'] = weighted_average(
+                f'm{ft_pref}_dad_netSCLs', w_att)
+            global_stats[ft_str]['maternal net SCLs'] = weighted_average(
+                f'm{ft_pref}_mom_netSCLs', w_att)
+    return dict(global_stats)
 
 
 def save_global_stats(global_stats,
@@ -552,11 +602,7 @@ def save_global_stats(global_stats,
     else:
         F = sys.stdout
 
-    for section in global_stats.keys():
-        print(file=F)
-        print(section, file=F)
-        for param in global_stats[section].keys():
-            print(f"  {param}:\t{global_stats[section][param]}", file=F)
+    yaml.dump(global_stats, F, sort_keys=False)
 
     if file_name:
         F.close()
@@ -728,7 +774,7 @@ def cli(cli_args=None):
             save_global_stats(global_stats,
                               res_dir / f"global_stats_{model.model_name}")
             GSB.append(global_stats)
-            if global_stats['Prediction method']['precise']:
+            if global_stats['prediction']['precise']:
                 assert run == 0
                 break
-    save_global_stats_table(GSB, out_dir / "models_results.txt")
+    # save_global_stats_table(GSB, out_dir / "models_results.txt")

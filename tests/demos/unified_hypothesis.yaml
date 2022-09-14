@@ -1,0 +1,7 @@
+---
+threshold_model:
+  name: "strict"
+  male_threshold: 0
+  female_threshold: 1
+  locus_classes:
+    - {w: 1, f: 0.01, n: 1}
