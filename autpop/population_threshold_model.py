@@ -616,7 +616,7 @@ def compute_global_stats(all_stats, family_type_set: FamilyTypeSet,
     n_unaffected_parents_families_with_sample_based_predictions = \
         len([1 for st in all_stats
              if not st['precise_prediction'] and
-             not st['parents_affected']])
+             st['unaffected_parents']])
     global_stats['prediction_details'] = {
 
         'precise':
@@ -833,6 +833,13 @@ def cli(cli_args=None):
     parser.add_argument("-op", "--output_precision", type=int, default=3,
                         help="The precision of all float values in the "
                         "models_results.txt output table.")
+    parser.add_argument("-od", "--output_dir", type=str, default=None,
+                        help="The output directory. By default, a directory, "
+                        "next to the model definition file file will be used: "
+                        "if the model definition is "
+                        "<dir>/<model definition>.yaml, the output default "
+                        "output directory will be named "
+                        "<dir>/<model definition>_results.")
 
     args = parser.parse_args(cli_args)
 
@@ -844,8 +851,10 @@ def cli(cli_args=None):
         modelsD = {m.model_name: m for m in models}
         models = [modelsD[mn] for mn in args.model]
 
-    pre, _ = os.path.splitext(args.models_file)
-    out_dir = pathlib.Path(pre + "_results")
+    out_dir = args.out_dir
+    if not out_dir:
+        pre, _ = os.path.splitext(args.models_file)
+        out_dir = pathlib.Path(pre + "_results")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     GSB = []
