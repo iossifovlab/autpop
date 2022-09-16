@@ -851,8 +851,9 @@ def cli(cli_args=None):
         modelsD = {m.model_name: m for m in models}
         models = [modelsD[mn] for mn in args.model]
 
-    out_dir = args.out_dir
-    if not out_dir:
+    if args.output_dir:
+        out_dir = pathlib.Path(args.output_dir)
+    else:
         pre, _ = os.path.splitext(args.models_file)
         out_dir = pathlib.Path(pre + "_results")
     out_dir.mkdir(parents=True, exist_ok=True)
